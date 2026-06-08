@@ -17,8 +17,11 @@ rescale = input.bool(true, "Auf Chart-Instrument umskalieren (ETF -> XAUUSD/Futu
 showMP  = input.bool(true, "Max Pain zeigen", group = g2)
 showReg = input.bool(true, "Regime-Hintergrund (Spot vs Flip)", group = g2)
 
-// Skalierungsfaktor: Chart-Preis / ETF-Spot
-k = rescale and spotI > 0 ? close / spotI : 1.0
+// Skalierungsfaktor MUSS Tageskonstante sein (sonst wackeln die Level mit dem Preis):
+// Instrument-Tagesschluss (gestern, intraday konstant) / ETF-Spot.
+dayRef = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
+refPx  = na(dayRef) ? close : dayRef
+k = rescale and spotI > 0 ? refPx / spotI : 1.0
 flip  = flipI  * k
 cwall = cwallI * k
 pwall = pwallI * k

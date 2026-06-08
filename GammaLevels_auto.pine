@@ -6,21 +6,21 @@
 indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
 
 // ===== TAGES-LEVEL (auto-generiert, 2026-06-08) =====
-NQ_FLIP = 718.60
+NQ_FLIP = 720.10
 NQ_CW   = 720.00
 NQ_PW   = 700.00
 NQ_MP   = 700.00
-NQ_SPOT = 717.45
-DOW_FLIP = 507.09
+NQ_SPOT = 718.68
+DOW_FLIP = 506.65
 DOW_CW   = 520.00
-DOW_PW   = 485.00
+DOW_PW   = 480.00
 DOW_MP   = 495.00
-DOW_SPOT = 508.89
-GOLD_FLIP = 405.64
-GOLD_CW   = 425.00
-GOLD_PW   = 360.00
+DOW_SPOT = 508.91
+GOLD_FLIP = 405.86
+GOLD_CW   = 420.00
+GOLD_PW   = 400.00
 GOLD_MP   = 404.00
-GOLD_SPOT = 397.99
+GOLD_SPOT = 397.73
 DAX_FLIP = 0.00
 DAX_CW   = 0.00
 DAX_PW   = 0.00
@@ -61,7 +61,11 @@ pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
 mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
 spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 
-k = rescale and spotI > 0 ? close / spotI : 1.0
+// Umrechnungsfaktor MUSS eine Tageskonstante sein (sonst wackeln die Level mit dem Preis):
+// Instrument-Tagesschluss (gestern, intraday konstant) / ETF-Spot.
+dayRef = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
+refPx  = na(dayRef) ? close : dayRef
+k = rescale and spotI > 0 ? refPx / spotI : 1.0
 flip = flipI * k
 cw   = cwI * k
 pw   = pwI * k

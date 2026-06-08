@@ -104,7 +104,11 @@ pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
 mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
 spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 
-k = rescale and spotI > 0 ? close / spotI : 1.0
+// Umrechnungsfaktor MUSS eine Tageskonstante sein (sonst wackeln die Level mit dem Preis):
+// Instrument-Tagesschluss (gestern, intraday konstant) / ETF-Spot.
+dayRef = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
+refPx  = na(dayRef) ? close : dayRef
+k = rescale and spotI > 0 ? refPx / spotI : 1.0
 flip = flipI * k
 cw   = cwI * k
 pw   = pwI * k
