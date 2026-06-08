@@ -1,8 +1,7 @@
 //@version=5
 // Gamma Levels (Manual Input)  [KruegerAlgorithms]
-// Funktioniert HEUTE ohne Pine-Seed-Freischaltung: die 5 Zahlen aus `python build_seed.py`
-// einmal taeglich in die Inputs eintippen. Optional Auto-Umskalierung ETF -> Chart-Instrument
-// (z.B. GLD-Level auf XAUUSD), via "ETF Spot".
+// Funktioniert ohne Pine-Seed-Freischaltung: die 5 Zahlen aus `python build_seed.py` eintippen.
+// Zeichnet feste horizontale Level (am aktuellen Bar berechnet) + optional Auto-Umskalierung ETF -> Chart.
 indicator("Gamma Levels (Manual) [KruegerAlgorithms]", overlay = true)
 
 g = "Level (aus build_seed.py ablesen)"
@@ -17,28 +16,34 @@ rescale = input.bool(true, "Auf Chart-Instrument umskalieren (ETF -> XAUUSD/Futu
 showMP  = input.bool(true, "Max Pain zeigen", group = g2)
 showReg = input.bool(true, "Regime-Hintergrund (Spot vs Flip)", group = g2)
 
-// Skalierungsfaktor MUSS Tageskonstante sein (sonst wackeln die Level mit dem Preis):
-// Instrument-Tagesschluss (gestern, intraday konstant) / ETF-Spot.
-dayRef = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
-refPx  = na(dayRef) ? close : dayRef
-k = rescale and spotI > 0 ? refPx / spotI : 1.0
+// Umrechnung am AKTUELLEN Bar (Index/ETF taggleich), als feste Linien gezeichnet.
+k = rescale and spotI > 0 ? close / spotI : 1.0
 flip  = flipI  * k
 cwall = cwallI * k
 pwall = pwallI * k
 mpain = mpainI * k
 
-plot(flipI  > 0 ? flip  : na, "Gamma Flip", color = color.yellow, linewidth = 2)
-plot(cwallI > 0 ? cwall : na, "Call Wall",  color = color.red,    linewidth = 2)
-plot(pwallI > 0 ? pwall : na, "Put Wall",   color = color.green,  linewidth = 2)
-plot(showMP and mpainI > 0 ? mpain : na, "Max Pain", color = color.gray, linewidth = 1, style = plot.style_circles)
-
-// Regime in ETF-Termini (Spot vs Flip): ueber Flip = long gamma (Pin/Reversion), darunter = short (Trend)
+// Regime in ETF-Termini: Spot ueber Flip = long gamma (Pin/Reversion), darunter = short (Trend)
 refSpot = rescale and spotI > 0 ? spotI : close
 longGamma = flipI > 0 and refSpot > flipI
 bgcolor(showReg and flipI > 0 ? (longGamma ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
 
+var line lF = na
+var line lC = na
+var line lP = na
+var line lM = na
 var label lab = na
-if barstate.islast and flipI > 0
-    label.delete(lab)
-    txt = (longGamma ? "LONG gamma (Pin/Reversion)" : "SHORT gamma (Trend/Amplify)") + "\nFlip " + str.tostring(flip, format.mintick)
-    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = longGamma ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small)
+if barstate.islast
+    line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lM), label.delete(lab)
+    x1 = bar_index - 400
+    if flipI > 0
+        lF := line.new(x1, flip,  bar_index, flip,  color = color.yellow, width = 2, extend = extend.right)
+    if cwallI > 0
+        lC := line.new(x1, cwall, bar_index, cwall, color = color.red,    width = 2, extend = extend.right)
+    if pwallI > 0
+        lP := line.new(x1, pwall, bar_index, pwall, color = color.green,  width = 2, extend = extend.right)
+    if showMP and mpainI > 0
+        lM := line.new(x1, mpain, bar_index, mpain, color = color.gray,   width = 1, extend = extend.right, style = line.style_dotted)
+    if flipI > 0
+        txt = (longGamma ? "LONG gamma (Pin/Reversion)" : "SHORT gamma (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
+        lab := label.new(bar_index, high, txt, style = label.style_label_left, color = longGamma ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small)

@@ -104,28 +104,33 @@ pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
 mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
 spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 
-// Umrechnungsfaktor MUSS eine Tageskonstante sein (sonst wackeln die Level mit dem Preis):
-// Instrument-Tagesschluss (gestern, intraday konstant) / ETF-Spot.
-dayRef = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
-refPx  = na(dayRef) ? close : dayRef
-k = rescale and spotI > 0 ? refPx / spotI : 1.0
+// Umrechnung am AKTUELLEN Bar (Index/ETF taggleich) -> als feste horizontale Linien zeichnen.
+k = rescale and spotI > 0 ? close / spotI : 1.0
 flip = flipI * k
 cw   = cwI * k
 pw   = pwI * k
 mp   = mpI * k
 
-plot(flipI > 0 ? flip : na, "Gamma Flip", color.yellow, 2)
-plot(cwI  > 0 ? cw   : na, "Call Wall",  color.red,    2)
-plot(pwI  > 0 ? pw   : na, "Put Wall",   color.green,  2)
-plot(showMP and mpI > 0 ? mp : na, "Max Pain", color.gray, 1, style = plot.style_circles)
-
 refSpot = rescale and spotI > 0 ? spotI : close
 longG = flipI > 0 and refSpot > flipI
 bgcolor(showReg and flipI > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
 
+var line lF = na
+var line lC = na
+var line lP = na
+var line lM = na
 var label lab = na
 if barstate.islast
-    label.delete(lab)
+    line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lM), label.delete(lab)
+    x1 = bar_index - 400
+    if flipI > 0
+        lF := line.new(x1, flip, bar_index, flip, color = color.yellow, width = 2, extend = extend.right)
+    if cwI > 0
+        lC := line.new(x1, cw,  bar_index, cw,  color = color.red,    width = 2, extend = extend.right)
+    if pwI > 0
+        lP := line.new(x1, pw,  bar_index, pw,  color = color.green,  width = 2, extend = extend.right)
+    if showMP and mpI > 0
+        lM := line.new(x1, mp,  bar_index, mp,  color = color.gray,   width = 1, extend = extend.right, style = line.style_dotted)
     txt = flipI <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
     lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flipI <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
 '''
