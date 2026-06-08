@@ -62,12 +62,12 @@ def write_symbol_info(tickers, meta):
         "session": ["24x7"] * len(tickers),
         "type": ["index"] * len(tickers),
     }
-    (SYM / "krueger_gamma.json").write_text(json.dumps(info, indent=2))
+    (SYM / "gamma-seed.json").write_text(json.dumps(info, indent=2))   # Dateiname = Repo-Name (Pine-Seed-Regel)
 
 
 def main():
     today = date.today()
-    tickers, meta = [], {}
+    tickers, meta, copyrows = [], {}, []
     print(f"=== Gamma-Seed-Build  {today} ===\n")
     for prefix, ccy, thunk in CONFIG:
         try:
@@ -75,6 +75,7 @@ def main():
         except NotImplementedError as e:
             print(f"[skip] {prefix}: {e}"); continue
         lv = gex.compute_levels(ch.df, ch.spot)
+        copyrows.append((prefix, lv))
         vals = {"FLIP": lv["gamma_flip"], "CWALL": lv["call_wall"], "PWALL": lv["put_wall"],
                 "MAXPAIN": lv["max_pain"], "GEXBN": lv["total_gex"] / 1e9, "SPOT": lv["spot"]}
         print(f"{prefix:5s} spot {lv['spot']:.0f} | regime {lv['regime'].upper():5s} "
@@ -89,8 +90,19 @@ def main():
     if tickers:
         write_symbol_info(tickers, meta)
         print(f"\nGeschrieben: {len(tickers)} Ticker -> {DATA}")
-        print(f"symbol_info -> {SYM/'krueger_gamma.json'}")
-        print("\nNaechster Schritt: git add/commit/push  (siehe README).")
+        print(f"symbol_info -> {SYM/'gamma-seed.json'}")
+
+    # ---- COPY-BLOCK fuer den Manual-Input-Pine-Indikator ----
+    lines = [f"=== GAMMA-LEVEL {today} — in 'Gamma Levels (Manual)' eintippen ==="]
+    for prefix, lv in copyrows:
+        lines.append(
+            f"{prefix:5s} | Flip {lv['gamma_flip']:.2f} | CallWall {lv['call_wall']:.2f} | "
+            f"PutWall {lv['put_wall']:.2f} | MaxPain {lv['max_pain']:.2f} | ETF-Spot {lv['spot']:.2f} "
+            f"| Regime {lv['regime'].upper()}")
+    block = "\n".join(lines)
+    print("\n" + block)
+    (ROOT / "today_levels.txt").write_text(block + "\n", encoding="utf-8")
+    print(f"\n(auch gespeichert in {ROOT/'today_levels.txt'})")
 
 
 if __name__ == "__main__":

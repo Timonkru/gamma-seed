@@ -1,0 +1,41 @@
+//@version=5
+// Gamma Levels (Manual Input)  [KruegerAlgorithms]
+// Funktioniert HEUTE ohne Pine-Seed-Freischaltung: die 5 Zahlen aus `python build_seed.py`
+// einmal taeglich in die Inputs eintippen. Optional Auto-Umskalierung ETF -> Chart-Instrument
+// (z.B. GLD-Level auf XAUUSD), via "ETF Spot".
+indicator("Gamma Levels (Manual) [KruegerAlgorithms]", overlay = true)
+
+g = "Level (aus build_seed.py ablesen)"
+flipI  = input.float(0.0, "Gamma Flip (ETF)", group = g)
+cwallI = input.float(0.0, "Call Wall (ETF)",  group = g)
+pwallI = input.float(0.0, "Put Wall (ETF)",   group = g)
+mpainI = input.float(0.0, "Max Pain (ETF)",   group = g)
+spotI  = input.float(0.0, "ETF Spot (fuer Umskalierung)", group = g)
+
+g2 = "Anzeige"
+rescale = input.bool(true, "Auf Chart-Instrument umskalieren (ETF -> XAUUSD/Futures)", group = g2)
+showMP  = input.bool(true, "Max Pain zeigen", group = g2)
+showReg = input.bool(true, "Regime-Hintergrund (Spot vs Flip)", group = g2)
+
+// Skalierungsfaktor: Chart-Preis / ETF-Spot
+k = rescale and spotI > 0 ? close / spotI : 1.0
+flip  = flipI  * k
+cwall = cwallI * k
+pwall = pwallI * k
+mpain = mpainI * k
+
+plot(flipI  > 0 ? flip  : na, "Gamma Flip", color = color.yellow, linewidth = 2)
+plot(cwallI > 0 ? cwall : na, "Call Wall",  color = color.red,    linewidth = 2)
+plot(pwallI > 0 ? pwall : na, "Put Wall",   color = color.green,  linewidth = 2)
+plot(showMP and mpainI > 0 ? mpain : na, "Max Pain", color = color.gray, linewidth = 1, style = plot.style_circles)
+
+// Regime in ETF-Termini (Spot vs Flip): ueber Flip = long gamma (Pin/Reversion), darunter = short (Trend)
+refSpot = rescale and spotI > 0 ? spotI : close
+longGamma = flipI > 0 and refSpot > flipI
+bgcolor(showReg and flipI > 0 ? (longGamma ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
+
+var label lab = na
+if barstate.islast and flipI > 0
+    label.delete(lab)
+    txt = (longGamma ? "LONG gamma (Pin/Reversion)" : "SHORT gamma (Trend/Amplify)") + "\nFlip " + str.tostring(flip, format.mintick)
+    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = longGamma ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small)
