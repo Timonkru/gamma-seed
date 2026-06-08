@@ -6,7 +6,7 @@
 indicator("Gamma Levels (Seed) [KruegerAlgorithms]", overlay = true)
 
 // ---- Inputs ----
-src    = input.string("seed_DEINUSER_gamma-seed", "Seed-Quelle (seed_<githubuser>_<repo>)")
+src    = input.string("seed_Timonkru_gamma-seed", "Seed-Quelle (seed_<githubuser>_<repo>)")
 prefix = input.string("GOLD", "Index-Prefix", options = ["NQ", "DOW", "GOLD", "DAX", "FTSE"])
 showRegime = input.bool(true, "Regime-Hintergrund (ueber/unter Flip)")
 showMaxPain = input.bool(true, "Max-Pain zeigen")

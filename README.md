@@ -26,11 +26,12 @@ git add -A && git commit -m "gamma EOD update" && git push
    - `data/<TICKER>.csv` — Zeilen `YYYYMMDDT,O,H,L,C,Vol` (hier O=H=L=C=Level), täglich.
 3. **Aktivierung beantragen** (TradingView prüft/whitelistet das Repo) — aktueller Weg laut TradingView-Doku
    „Pine Seed": Repo nach Spezifikation anlegen und über das TradingView-Formular/den angegebenen Kontakt einreichen.
-4. Nach Freischaltung ist die Quelle als **`seed_<githubuser>_<reponame>`** ansprechbar:
+4. Nach Freischaltung ist die Quelle als **`seed_<githubuser>_<reponame>`** ansprechbar — hier:
    ```pine
-   request.seed("seed_DEINUSER_gamma-seed", "DAX_FLIP", close)
+   request.seed("seed_Timonkru_gamma-seed", "GOLD_FLIP", close)
    ```
-   → im Indikator `GammaLevels_seed.pine` oben `src` auf genau diesen String setzen.
+   → im Indikator `GammaLevels_seed.pine` ist `src` bereits auf `seed_Timonkru_gamma-seed` gesetzt.
+   Repo: https://github.com/Timonkru/gamma-seed (public, Branch `main`).
 
 > Hinweis: Seed-Daten sind **EOD/daily** und werden bei jedem Push aktualisiert — genau richtig, weil OI
 > ohnehin erst nach Börsenschluss publiziert wird.
