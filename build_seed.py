@@ -65,6 +65,84 @@ def write_symbol_info(tickers, meta):
     (SYM / "gamma-seed.json").write_text(json.dumps(info, indent=2))   # Dateiname = Repo-Name (Pine-Seed-Regel)
 
 
+AUTO_TEMPLATE = r'''//@version=5
+// Gamma Levels (Auto)  [KruegerAlgorithms]  — AUTO-GENERIERT von build_seed.py (NICHT haendisch editieren)
+// Erkennt das Chart-Symbol automatisch (US30 / US100 / Gold; DAX/FTSE sobald Daten) und zeigt die passenden Gamma-Level.
+// Taeglich: `python build_seed.py` laufen lassen -> diese Datei komplett in den Pine-Editor kopieren -> Save.
+// Danach durch die Charts flippen: stellt sich von selbst ein.
+indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
+
+// ===== TAGES-LEVEL (auto-generiert, __DATE__) =====
+__LEVELS__
+// ==================================================
+
+idx     = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
+rescale = input.bool(true, "Auf Chart umskalieren (ETF -> CFD/Futures)")
+showMP  = input.bool(true, "Max Pain zeigen")
+showReg = input.bool(true, "Regime-Hintergrund")
+
+t = str.upper(syminfo.ticker)
+detect() =>
+    r = "NONE"
+    if str.contains(t,"NAS") or str.contains(t,"US100") or str.contains(t,"USTEC") or str.contains(t,"NDX") or str.contains(t,"USTECH")
+        r := "NQ"
+    else if str.contains(t,"US30") or str.contains(t,"WS30") or str.contains(t,"DJ") or str.contains(t,"DOW")
+        r := "DOW"
+    else if str.contains(t,"XAU") or str.contains(t,"GOLD")
+        r := "GOLD"
+    else if str.contains(t,"GER") or str.contains(t,"DAX") or str.contains(t,"DE40") or str.contains(t,"DE30")
+        r := "DAX"
+    else if str.contains(t,"UK100") or str.contains(t,"FTSE")
+        r := "FTSE"
+    r
+sel = idx == "Auto" ? detect() : idx
+
+pick(nq, dw, gd, dx, ft) => sel == "NQ" ? nq : sel == "DOW" ? dw : sel == "GOLD" ? gd : sel == "DAX" ? dx : sel == "FTSE" ? ft : 0.0
+flipI = pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP)
+cwI   = pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW)
+pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
+mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
+spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
+
+k = rescale and spotI > 0 ? close / spotI : 1.0
+flip = flipI * k
+cw   = cwI * k
+pw   = pwI * k
+mp   = mpI * k
+
+plot(flipI > 0 ? flip : na, "Gamma Flip", color.yellow, 2)
+plot(cwI  > 0 ? cw   : na, "Call Wall",  color.red,    2)
+plot(pwI  > 0 ? pw   : na, "Put Wall",   color.green,  2)
+plot(showMP and mpI > 0 ? mp : na, "Max Pain", color.gray, 1, style = plot.style_circles)
+
+refSpot = rescale and spotI > 0 ? spotI : close
+longG = flipI > 0 and refSpot > flipI
+bgcolor(showReg and flipI > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
+
+var label lab = na
+if barstate.islast
+    label.delete(lab)
+    txt = flipI <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
+    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flipI <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
+'''
+
+
+def gen_auto_pine(levels, today):
+    """Schreibt GammaLevels_auto.pine mit den heutigen Leveln aller Indizes (fehlende = 0)."""
+    order = ["NQ", "DOW", "GOLD", "DAX", "FTSE"]
+    lines = []
+    for k in order:
+        f, cw, pw, mp, sp = levels.get(k, (0, 0, 0, 0, 0))
+        lines.append(f"{k}_FLIP = {f:.2f}")
+        lines.append(f"{k}_CW   = {cw:.2f}")
+        lines.append(f"{k}_PW   = {pw:.2f}")
+        lines.append(f"{k}_MP   = {mp:.2f}")
+        lines.append(f"{k}_SPOT = {sp:.2f}")
+    pine = AUTO_TEMPLATE.replace("__LEVELS__", "\n".join(lines)).replace("__DATE__", str(today))
+    (ROOT / "GammaLevels_auto.pine").write_text(pine, encoding="utf-8")
+    return ROOT / "GammaLevels_auto.pine"
+
+
 def main():
     today = date.today()
     tickers, meta, copyrows = [], {}, []
@@ -102,7 +180,12 @@ def main():
     block = "\n".join(lines)
     print("\n" + block)
     (ROOT / "today_levels.txt").write_text(block + "\n", encoding="utf-8")
-    print(f"\n(auch gespeichert in {ROOT/'today_levels.txt'})")
+
+    # ---- AUTO-Pine generieren (Symbol-Erkennung, alle Indizes) ----
+    levels = {p: (lv["gamma_flip"], lv["call_wall"], lv["put_wall"], lv["max_pain"], lv["spot"]) for p, lv in copyrows}
+    auto = gen_auto_pine(levels, today)
+    print(f"\nAUTO-Indikator regeneriert -> {auto}")
+    print("   => komplette Datei in den TradingView-Pine-Editor kopieren (1x/Tag). Erkennt US30/US100/Gold automatisch.")
 
 
 if __name__ == "__main__":

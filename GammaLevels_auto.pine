@@ -1,0 +1,83 @@
+//@version=5
+// Gamma Levels (Auto)  [KruegerAlgorithms]  — AUTO-GENERIERT von build_seed.py (NICHT haendisch editieren)
+// Erkennt das Chart-Symbol automatisch (US30 / US100 / Gold; DAX/FTSE sobald Daten) und zeigt die passenden Gamma-Level.
+// Taeglich: `python build_seed.py` laufen lassen -> diese Datei komplett in den Pine-Editor kopieren -> Save.
+// Danach durch die Charts flippen: stellt sich von selbst ein.
+indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
+
+// ===== TAGES-LEVEL (auto-generiert, 2026-06-08) =====
+NQ_FLIP = 718.60
+NQ_CW   = 720.00
+NQ_PW   = 700.00
+NQ_MP   = 700.00
+NQ_SPOT = 717.45
+DOW_FLIP = 507.09
+DOW_CW   = 520.00
+DOW_PW   = 485.00
+DOW_MP   = 495.00
+DOW_SPOT = 508.89
+GOLD_FLIP = 405.64
+GOLD_CW   = 425.00
+GOLD_PW   = 360.00
+GOLD_MP   = 404.00
+GOLD_SPOT = 397.99
+DAX_FLIP = 0.00
+DAX_CW   = 0.00
+DAX_PW   = 0.00
+DAX_MP   = 0.00
+DAX_SPOT = 0.00
+FTSE_FLIP = 0.00
+FTSE_CW   = 0.00
+FTSE_PW   = 0.00
+FTSE_MP   = 0.00
+FTSE_SPOT = 0.00
+// ==================================================
+
+idx     = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
+rescale = input.bool(true, "Auf Chart umskalieren (ETF -> CFD/Futures)")
+showMP  = input.bool(true, "Max Pain zeigen")
+showReg = input.bool(true, "Regime-Hintergrund")
+
+t = str.upper(syminfo.ticker)
+detect() =>
+    r = "NONE"
+    if str.contains(t,"NAS") or str.contains(t,"US100") or str.contains(t,"USTEC") or str.contains(t,"NDX") or str.contains(t,"USTECH")
+        r := "NQ"
+    else if str.contains(t,"US30") or str.contains(t,"WS30") or str.contains(t,"DJ") or str.contains(t,"DOW")
+        r := "DOW"
+    else if str.contains(t,"XAU") or str.contains(t,"GOLD")
+        r := "GOLD"
+    else if str.contains(t,"GER") or str.contains(t,"DAX") or str.contains(t,"DE40") or str.contains(t,"DE30")
+        r := "DAX"
+    else if str.contains(t,"UK100") or str.contains(t,"FTSE")
+        r := "FTSE"
+    r
+sel = idx == "Auto" ? detect() : idx
+
+pick(nq, dw, gd, dx, ft) => sel == "NQ" ? nq : sel == "DOW" ? dw : sel == "GOLD" ? gd : sel == "DAX" ? dx : sel == "FTSE" ? ft : 0.0
+flipI = pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP)
+cwI   = pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW)
+pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
+mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
+spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
+
+k = rescale and spotI > 0 ? close / spotI : 1.0
+flip = flipI * k
+cw   = cwI * k
+pw   = pwI * k
+mp   = mpI * k
+
+plot(flipI > 0 ? flip : na, "Gamma Flip", color.yellow, 2)
+plot(cwI  > 0 ? cw   : na, "Call Wall",  color.red,    2)
+plot(pwI  > 0 ? pw   : na, "Put Wall",   color.green,  2)
+plot(showMP and mpI > 0 ? mp : na, "Max Pain", color.gray, 1, style = plot.style_circles)
+
+refSpot = rescale and spotI > 0 ? spotI : close
+longG = flipI > 0 and refSpot > flipI
+bgcolor(showReg and flipI > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
+
+var label lab = na
+if barstate.islast
+    label.delete(lab)
+    txt = flipI <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
+    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flipI <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
