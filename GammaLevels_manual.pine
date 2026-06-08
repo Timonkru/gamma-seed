@@ -34,7 +34,11 @@ var line lP = na
 var line lM = na
 var label lab = na
 if barstate.islast
-    line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lM), label.delete(lab)
+    line.delete(lF)
+    line.delete(lC)
+    line.delete(lP)
+    line.delete(lM)
+    label.delete(lab)
     x1 = bar_index - 400
     if flipI > 0
         lF := line.new(x1, flip,  bar_index, flip,  color = color.yellow, width = 2, extend = extend.right)

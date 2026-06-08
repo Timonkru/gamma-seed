@@ -6,21 +6,21 @@
 indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
 
 // ===== TAGES-LEVEL (auto-generiert, 2026-06-08) =====
-NQ_FLIP = 719.93
-NQ_CW   = 720.00
+NQ_FLIP = 720.36
+NQ_CW   = 750.00
 NQ_PW   = 700.00
 NQ_MP   = 700.00
-NQ_SPOT = 717.89
-DOW_FLIP = 506.55
+NQ_SPOT = 717.76
+DOW_FLIP = 506.52
 DOW_CW   = 520.00
 DOW_PW   = 485.00
 DOW_MP   = 495.00
-DOW_SPOT = 508.99
-GOLD_FLIP = 405.88
+DOW_SPOT = 508.96
+GOLD_FLIP = 406.58
 GOLD_CW   = 420.00
-GOLD_PW   = 400.00
+GOLD_PW   = 360.00
 GOLD_MP   = 404.00
-GOLD_SPOT = 397.89
+GOLD_SPOT = 397.84
 DAX_FLIP = 0.00
 DAX_CW   = 0.00
 DAX_PW   = 0.00
@@ -78,7 +78,11 @@ var line lP = na
 var line lM = na
 var label lab = na
 if barstate.islast
-    line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lM), label.delete(lab)
+    line.delete(lF)
+    line.delete(lC)
+    line.delete(lP)
+    line.delete(lM)
+    label.delete(lab)
     x1 = bar_index - 400
     if flipI > 0
         lF := line.new(x1, flip, bar_index, flip, color = color.yellow, width = 2, extend = extend.right)
