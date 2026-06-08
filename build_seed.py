@@ -32,6 +32,8 @@ CONFIG = [
 ]
 
 # je PREFIX diese Ticker (jeweils eine EOD-Wertreihe, O=H=L=C=Level)
+# Echter Index/Underlying je Prefix -> Level werden in Index-Punkte umgerechnet (fixe Preise, CFD-Skala)
+INDEX_SYM = {"NQ": "^NDX", "DOW": "^DJI", "GOLD": "GC=F"}
 METRICS = ["FLIP", "CWALL", "PWALL", "MAXPAIN", "GEXBN", "SPOT"]
 DESС = {"FLIP": "Gamma Flip", "CWALL": "Call Wall", "PWALL": "Put Wall",
         "MAXPAIN": "Max Pain", "GEXBN": "Net GEX ($bn)", "SPOT": "Underlying Spot (ETF)"}
@@ -72,12 +74,12 @@ AUTO_TEMPLATE = r'''//@version=5
 // Danach durch die Charts flippen: stellt sich von selbst ein.
 indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
 
-// ===== TAGES-LEVEL (auto-generiert, __DATE__) =====
+// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert, __DATE__) — feste Preise, KEINE Live-Umrechnung =====
 __LEVELS__
-// ==================================================
+// =========================================================================================
 
 idx     = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
-rescale = input.bool(true, "Auf Chart umskalieren (ETF -> CFD/Futures)")
+offset  = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis-Korrektur)")
 showMP  = input.bool(true, "Max Pain zeigen")
 showReg = input.bool(true, "Regime-Hintergrund")
 
@@ -98,22 +100,18 @@ detect() =>
 sel = idx == "Auto" ? detect() : idx
 
 pick(nq, dw, gd, dx, ft) => sel == "NQ" ? nq : sel == "DOW" ? dw : sel == "GOLD" ? gd : sel == "DAX" ? dx : sel == "FTSE" ? ft : 0.0
-flipI = pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP)
-cwI   = pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW)
-pwI   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
-mpI   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
-spotI = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
+// Level sind bereits feste Preise in Index-Punkten -> nur optionaler Offset, KEINE Skalierung mit close.
+flip = pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP)
+cw   = pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW)
+pw   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
+mp   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
+flip := flip > 0 ? flip + offset : flip
+cw   := cw   > 0 ? cw   + offset : cw
+pw   := pw   > 0 ? pw   + offset : pw
+mp   := mp   > 0 ? mp   + offset : mp
 
-// Umrechnung am AKTUELLEN Bar (Index/ETF taggleich) -> als feste horizontale Linien zeichnen.
-k = rescale and spotI > 0 ? close / spotI : 1.0
-flip = flipI * k
-cw   = cwI * k
-pw   = pwI * k
-mp   = mpI * k
-
-refSpot = rescale and spotI > 0 ? spotI : close
-longG = flipI > 0 and refSpot > flipI
-bgcolor(showReg and flipI > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
+longG = flip > 0 and close > flip
+bgcolor(showReg and flip > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
 
 var line lF = na
 var line lC = na
@@ -127,16 +125,16 @@ if barstate.islast
     line.delete(lM)
     label.delete(lab)
     x1 = bar_index - 400
-    if flipI > 0
+    if flip > 0
         lF := line.new(x1, flip, bar_index, flip, color = color.yellow, width = 2, extend = extend.right)
-    if cwI > 0
-        lC := line.new(x1, cw,  bar_index, cw,  color = color.red,    width = 2, extend = extend.right)
-    if pwI > 0
-        lP := line.new(x1, pw,  bar_index, pw,  color = color.green,  width = 2, extend = extend.right)
-    if showMP and mpI > 0
-        lM := line.new(x1, mp,  bar_index, mp,  color = color.gray,   width = 1, extend = extend.right, style = line.style_dotted)
-    txt = flipI <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
-    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flipI <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
+    if cw > 0
+        lC := line.new(x1, cw,   bar_index, cw,   color = color.red,    width = 2, extend = extend.right)
+    if pw > 0
+        lP := line.new(x1, pw,   bar_index, pw,   color = color.green,  width = 2, extend = extend.right)
+    if showMP and mp > 0
+        lM := line.new(x1, mp,   bar_index, mp,   color = color.gray,   width = 1, extend = extend.right, style = line.style_dotted)
+    txt = flip <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
+    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flip <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
 '''
 
 
@@ -166,6 +164,18 @@ def main():
         except NotImplementedError as e:
             print(f"[skip] {prefix}: {e}"); continue
         lv = gex.compute_levels(ch.df, ch.spot)
+        # ETF-Level -> Index-Punkte (fixe Preise auf CFD-Skala). Verhaeltnis R = Index/ETF taggleich.
+        isym = INDEX_SYM.get(prefix)
+        if isym:
+            try:
+                ispot = P.index_spot(isym)
+                R = ispot / lv["spot"]
+                for kk in ("gamma_flip", "call_wall", "put_wall", "max_pain"):
+                    if lv.get(kk) is not None:
+                        lv[kk] = lv[kk] * R
+                lv["etf_spot"] = lv["spot"]; lv["spot"] = ispot; lv["R"] = round(R, 4)
+            except Exception as e:
+                print(f"[warn] {prefix}: Index-Spot {isym} fehlgeschlagen, bleibe in ETF-Punkten ({e})")
         copyrows.append((prefix, lv))
         vals = {"FLIP": lv["gamma_flip"], "CWALL": lv["call_wall"], "PWALL": lv["put_wall"],
                 "MAXPAIN": lv["max_pain"], "GEXBN": lv["total_gex"] / 1e9, "SPOT": lv["spot"]}
@@ -188,7 +198,7 @@ def main():
     for prefix, lv in copyrows:
         lines.append(
             f"{prefix:5s} | Flip {lv['gamma_flip']:.2f} | CallWall {lv['call_wall']:.2f} | "
-            f"PutWall {lv['put_wall']:.2f} | MaxPain {lv['max_pain']:.2f} | ETF-Spot {lv['spot']:.2f} "
+            f"PutWall {lv['put_wall']:.2f} | MaxPain {lv['max_pain']:.2f} | Spot {lv['spot']:.2f} "
             f"| Regime {lv['regime'].upper()}")
     block = "\n".join(lines)
     print("\n" + block)

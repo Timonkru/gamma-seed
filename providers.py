@@ -74,6 +74,16 @@ def yf_us(symbol="QQQ", currency="USD", max_days=60, min_days=0, mult=100.0):
     return Chain(df=df, spot=spot, label=symbol, currency=currency)
 
 
+# ---------- Index-Spot (zur Umrechnung ETF-Level -> Index-Punkte) ----------
+def index_spot(symbol):
+    """Letzter Schluss des echten Index/Underlyings (^NDX, ^DJI, GC=F ...) via yfinance."""
+    import yfinance as yf
+    h = yf.Ticker(symbol).history(period="5d")
+    if len(h) == 0:
+        raise RuntimeError(f"index_spot({symbol}): leer")
+    return float(h["Close"].iloc[-1])
+
+
 # ---------- DAX (Eurex) — bezahlt/spaeter (Databento/MD+S), GRATIS-OI existiert nicht ----------
 def eurex_dax(date=None):
     """
