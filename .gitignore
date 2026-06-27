@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .DS_Store
 today_levels.txt
+
+# Tages-Artefakte: Gamma-Level-CSVs werden taeglich von build_seed.py regeneriert
+# -> nicht versionieren, haelt die History auf Code beschraenkt
+data/
