@@ -42,16 +42,23 @@ def synthetic(label="DAX", spot=18500.0, mult=5.0, currency="EUR",
 
 
 # ---------- US-ETFs (yfinance) — GRATIS, echtes OI + IV ----------
-def yf_us(symbol="QQQ", currency="USD", max_days=60, min_days=0, mult=100.0):
+def yf_us(symbol="QQQ", currency="USD", max_days=45, min_days=0, mult=100.0):
     """
     Gratis echte Optionskette via yfinance (US-ETFs): QQQ(NQ) / DIA(Dow) / GLD(Gold) / SPY.
-    Aggregiert alle Verfaelle bis max_days Tagen (Front-Gamma dominiert). OI + IV je Strike real.
+    Liefert ALLE Verfaelle bis max_days inkl. 'dte'-Spalte — der Aufrufer trennt
+    Struktur-Karte (dte>=7) und Nah-Karte (dte<=5). T in Handelstagen/252,
+    konsistent zur QC-Historie (KasseRL).
     """
     import yfinance as yf
+    import numpy as np
     from datetime import datetime, timezone
     import pandas as pd
     tk = yf.Ticker(symbol)
-    spot = float(tk.history(period="1d")["Close"].iloc[-1])
+    # Letzte NICHT-NaN Schlusszeile (yfinance haengt intraday eine NaN-Kerze an)
+    _h = tk.history(period="5d")["Close"].dropna()
+    if len(_h) == 0:
+        raise RuntimeError(f"yf_us({symbol}): kein gueltiger Spot-Close (Netz/Markt zu?).")
+    spot = float(_h.iloc[-1])
     today = datetime.now(timezone.utc).date()
     rows = []
     for exp in tk.options:
@@ -59,29 +66,38 @@ def yf_us(symbol="QQQ", currency="USD", max_days=60, min_days=0, mult=100.0):
         dte = (ed - today).days
         if dte < min_days or dte > max_days:
             continue
-        T = max(dte, 0.5) / 365.0
+        T = max(np.busday_count(today, ed), 0.5) / 252.0
         oc = tk.option_chain(exp)
         for d, typ in [(oc.calls, "C"), (oc.puts, "P")]:
-            s = d[["strike", "openInterest", "impliedVolatility"]].copy()
-            s = s.dropna()
-            s = s[(s["openInterest"] > 0) & (s["impliedVolatility"] > 0)]
+            s = d[["strike", "openInterest", "impliedVolatility", "volume"]].copy()
+            s["volume"] = s["volume"].fillna(0.0)
+            s = s.dropna(subset=["strike", "openInterest", "impliedVolatility"])
+            # Volumen > 0 reicht: intraday geoeffnete 0DTE-Positionen haben OI=0!
+            s = s[((s["openInterest"] > 0) | (s["volume"] > 0))
+                  & (s["impliedVolatility"] > 0)]
             for _, r in s.iterrows():
                 rows.append((float(r["strike"]), typ, float(r["openInterest"]),
-                             float(r["impliedVolatility"]), T, mult))
+                             float(r["impliedVolatility"]), T, mult, dte,
+                             float(r["volume"])))
     if not rows:
         raise RuntimeError(f"yf_us({symbol}): keine Optionsdaten erhalten (Netz/Markt zu?).")
-    df = pd.DataFrame(rows, columns=["strike", "type", "oi", "iv", "T", "mult"])
+    df = pd.DataFrame(rows, columns=["strike", "type", "oi", "iv", "T", "mult",
+                                     "dte", "vol"])
     return Chain(df=df, spot=spot, label=symbol, currency=currency)
 
 
 # ---------- Index-Spot (zur Umrechnung ETF-Level -> Index-Punkte) ----------
 def index_spot(symbol):
-    """Letzter Schluss des echten Index/Underlyings (^NDX, ^DJI, GC=F ...) via yfinance."""
+    """Letzter Schluss des echten Index/Underlyings (^NDX, ^DJI, GC=F ...) via yfinance.
+    yfinance liefert fuer Index-Symbole (^NDX/^DJI) oft eine abschliessende NaN-Kerze
+    (die laufende, noch nicht abgeschlossene Zeile) -> erst die NaN-Schlusskurse
+    verwerfen, dann den letzten guten Close nehmen, sonst wird R = NaN."""
     import yfinance as yf
     h = yf.Ticker(symbol).history(period="5d")
-    if len(h) == 0:
-        raise RuntimeError(f"index_spot({symbol}): leer")
-    return float(h["Close"].iloc[-1])
+    close = h["Close"].dropna() if len(h) else h.get("Close", [])
+    if len(close) == 0:
+        raise RuntimeError(f"index_spot({symbol}): kein gueltiger Close (leer/alles NaN)")
+    return float(close.iloc[-1])
 
 
 # ---------- DAX (Eurex) — bezahlt/spaeter (Databento/MD+S), GRATIS-OI existiert nicht ----------

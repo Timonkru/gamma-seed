@@ -81,24 +81,49 @@ def max_pain(chain):
     return float(best_E)
 
 
-def compute_levels(chain, spot, r=0.0):
+def compute_levels(chain, spot, r=0.0, neutral_pct=0.3):
     chain = chain.copy()
     chain = chain[(chain["oi"] > 0) & (chain["iv"] > 0) & (chain["T"] > 0)]
+    if len(chain) < 4:
+        return None
     psg = per_strike_gex(chain, spot, r)
     strikes = np.array(sorted(psg))
     netg = np.array([psg[k] for k in strikes])
-    # Call-Wall = groesster positiver GEX-Strike; Put-Wall = negativster
-    cw = float(strikes[np.argmax(netg)]) if (netg > 0).any() else None
-    pw = float(strikes[np.argmin(netg)]) if (netg < 0).any() else None
+    # Call-Wall = groesster positiver GEX-Strike; Put-Wall = negativster.
+    # Zweite Walls = naechstgroesste Cluster (das "Strike-Regal" dahinter).
+    cw = cw2 = pw = pw2 = None
+    pos = np.argsort(netg)
+    if (netg > 0).any():
+        cw = float(strikes[pos[-1]])
+        rest = [strikes[j] for j in pos[::-1][1:]
+                if netg[j] > 0 and abs(strikes[j] - cw) > 1e-9]
+        cw2 = float(rest[0]) if rest else None
+    if (netg < 0).any():
+        pw = float(strikes[pos[0]])
+        rest = [strikes[j] for j in pos[1:]
+                if netg[j] < 0 and abs(strikes[j] - pw) > 1e-9]
+        pw2 = float(rest[0]) if rest else None
     tg = total_gex(chain, spot, r)
     flip = gamma_flip(chain, spot, r)
+    # Regime mit Flip-ZONE: nahe am Flip ist kein Signal, sondern Niemandsland
+    if flip is None:
+        regime = "long" if tg > 0 else "short"
+    else:
+        d = (spot - flip) / spot * 100
+        regime = "neutral" if abs(d) < neutral_pct else ("long" if d > 0 else "short")
+    # Expected Move (1 Tag) aus ATM-IV: spot * iv * sqrt(1/252)
+    atm = chain.loc[(chain["strike"] - spot).abs().sort_values().index[:6], "iv"]
+    atm_iv = float(atm.median()) if len(atm) else None
+    em_1d = (spot * atm_iv / np.sqrt(252.0)) if atm_iv else None
     return {
         "spot": float(spot),
         "total_gex": tg,
-        "regime": "long" if tg > 0 else "short",
+        "regime": regime,
         "gamma_flip": flip,
-        "call_wall": cw,
-        "put_wall": pw,
+        "call_wall": cw, "call_wall2": cw2,
+        "put_wall": pw, "put_wall2": pw2,
         "max_pain": max_pain(chain),
+        "atm_iv": (round(atm_iv, 4) if atm_iv else None),
+        "exp_move_1d": (round(em_1d, 2) if em_1d else None),
         "dist_to_flip_pct": (round((spot - flip) / spot * 100, 2) if flip else None),
     }

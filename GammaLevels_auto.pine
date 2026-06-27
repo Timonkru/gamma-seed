@@ -1,42 +1,91 @@
-//@version=5
-// Gamma Levels (Auto)  [KruegerAlgorithms]  — AUTO-GENERIERT von build_seed.py (NICHT haendisch editieren)
-// Erkennt das Chart-Symbol automatisch (US30 / US100 / Gold; DAX/FTSE sobald Daten) und zeigt die passenden Gamma-Level.
-// Taeglich: `python build_seed.py` laufen lassen -> diese Datei komplett in den Pine-Editor kopieren -> Save.
-// Danach durch die Charts flippen: stellt sich von selbst ein.
-indicator("Gamma Levels (Auto) [KruegerAlgorithms]", overlay = true)
+//@version=6
+// Gamma Levels v2 (Auto) [KruegerAlgorithms] — AUTO-GENERIERT von build_seed.py (NICHT editieren)
+// STRUKTUR-Karte (7-45 DTE) = dicke Linien | NAH-Karte (0-5 DTE) = gepunktet = Tageswetter/Pinning
+// Taeglich VOR US-Open: `python build_seed.py` -> Datei komplett in den Pine-Editor -> Save.
+indicator("Gamma Levels v2 (Auto) [KruegerAlgorithms]", overlay = true)
 
-// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert, 2026-06-08) — feste Preise, KEINE Live-Umrechnung =====
-NQ_FLIP = 29554.48
-NQ_CW   = 29572.84
-NQ_PW   = 28751.38
-NQ_MP   = 28751.38
-NQ_SPOT = 29533.41
-DOW_FLIP = 50554.48
-DOW_CW   = 51897.21
-DOW_PW   = 47905.12
-DOW_MP   = 49402.15
-DOW_SPOT = 50857.27
-GOLD_FLIP = 4440.45
-GOLD_CW   = 4594.76
-GOLD_PW   = 4375.96
-GOLD_MP   = 4419.72
-GOLD_SPOT = 4361.30
+// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert 2026-06-26) =====
+NQ_FLIP = 29446.47
+NQ_CW = 29465.80
+NQ_PW = 29424.70
+NQ_CW2 = 29794.57
+NQ_PW2 = 29383.61
+NQ_NCW = 29506.90
+NQ_NPW = 29424.70
+NQ_NF = 29446.66
+NQ_MP = 29465.80
+NQ_SPOT = 29440.32
+NQ_EM = 0.41
+DOW_FLIP = 51921.85
+DOW_CW = 51994.61
+DOW_PW = 51894.62
+DOW_CW2 = 52094.60
+DOW_PW2 = 51694.64
+DOW_NCW = 58993.89
+DOW_NPW = 51894.62
+DOW_NF = 51932.35
+DOW_MP = 50994.72
+DOW_SPOT = 51920.62
+DOW_EM = 1.00
+GOLD_FLIP = 4061.67
+GOLD_CW = 4068.14
+GOLD_PW = 3958.19
+GOLD_CW2 = 4090.13
+GOLD_PW2 = 4013.16
+GOLD_NCW = 4068.14
+GOLD_NPW = 4057.14
+GOLD_NF = 4062.37
+GOLD_MP = 4397.99
+GOLD_SPOT = 4062.20
+GOLD_EM = 0.33
 DAX_FLIP = 0.00
-DAX_CW   = 0.00
-DAX_PW   = 0.00
-DAX_MP   = 0.00
+DAX_CW = 0.00
+DAX_PW = 0.00
+DAX_CW2 = 0.00
+DAX_PW2 = 0.00
+DAX_NCW = 0.00
+DAX_NPW = 0.00
+DAX_NF = 0.00
+DAX_MP = 0.00
 DAX_SPOT = 0.00
+DAX_EM = 0.00
 FTSE_FLIP = 0.00
-FTSE_CW   = 0.00
-FTSE_PW   = 0.00
-FTSE_MP   = 0.00
+FTSE_CW = 0.00
+FTSE_PW = 0.00
+FTSE_CW2 = 0.00
+FTSE_PW2 = 0.00
+FTSE_NCW = 0.00
+FTSE_NPW = 0.00
+FTSE_NF = 0.00
+FTSE_MP = 0.00
 FTSE_SPOT = 0.00
-// =========================================================================================
+FTSE_EM = 0.00
+LEV_DATE = "2026-06-26"
+LEV_Y = 2026
+LEV_M = 6
+LEV_D = 26
+// ==================================================================
 
-idx     = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
-offset  = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis-Korrektur)")
-showMP  = input.bool(true, "Max Pain zeigen")
-showReg = input.bool(true, "Regime-Hintergrund")
+idx        = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
+offset     = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis)")
+neutralPct = input.float(0.3, "Flip-Zone (± %)", minval = 0.05, step = 0.05)
+showReg    = input.bool(true, "Regime-Hintergrund (gruen/rot/grau)")
+
+grpS = "STRUKTUR-Karte (7-45 DTE) — stabile Tageslinien"
+showFlip = input.bool(true,  "FLIP — gelb, dick",                        group = grpS)
+showCW   = input.bool(true,  "CALL-WALL — rot, dick",                    group = grpS)
+showPW   = input.bool(true,  "PUT-WALL — gruen, dick",                   group = grpS)
+showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) — rot, gestrichelt",   group = grpS)
+showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) — gruen, gestrichelt",  group = grpS)
+
+grpN = "NAH-Karte (0-5 DTE) — 0DTE-Tageswetter/Pinning"
+showNCW  = input.bool(true,  "0DTE CALL-WALL — orange, gepunktet",       group = grpN)
+showNPW  = input.bool(true,  "0DTE PUT-WALL — tuerkis, gepunktet",       group = grpN)
+showNF   = input.bool(false, "0DTE FLIP — gelb, gepunktet",              group = grpN)
+
+grpX = "Sonstiges"
+showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag — blau, gepunktet", group = grpX)
+showMP   = input.bool(false, "MAX PAIN — grau, gepunktet",               group = grpX)
 
 t = str.upper(syminfo.ticker)
 detect() =>
@@ -55,38 +104,65 @@ detect() =>
 sel = idx == "Auto" ? detect() : idx
 
 pick(nq, dw, gd, dx, ft) => sel == "NQ" ? nq : sel == "DOW" ? dw : sel == "GOLD" ? gd : sel == "DAX" ? dx : sel == "FTSE" ? ft : 0.0
-// Level sind bereits feste Preise in Index-Punkten -> nur optionaler Offset, KEINE Skalierung mit close.
-flip = pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP)
-cw   = pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW)
-pw   = pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW)
-mp   = pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP)
-flip := flip > 0 ? flip + offset : flip
-cw   := cw   > 0 ? cw   + offset : cw
-pw   := pw   > 0 ? pw   + offset : pw
-mp   := mp   > 0 ? mp   + offset : mp
+off(x) => x > 0 ? x + offset : x
 
-longG = flip > 0 and close > flip
-bgcolor(showReg and flip > 0 ? (longG ? color.new(color.green, 92) : color.new(color.red, 92)) : na)
+flip  = off(pick(NQ_FLIP, DOW_FLIP, GOLD_FLIP, DAX_FLIP, FTSE_FLIP))
+cw    = off(pick(NQ_CW,   DOW_CW,   GOLD_CW,   DAX_CW,   FTSE_CW))
+pw    = off(pick(NQ_PW,   DOW_PW,   GOLD_PW,   DAX_PW,   FTSE_PW))
+cw2   = off(pick(NQ_CW2,  DOW_CW2,  GOLD_CW2,  DAX_CW2,  FTSE_CW2))
+pw2   = off(pick(NQ_PW2,  DOW_PW2,  GOLD_PW2,  DAX_PW2,  FTSE_PW2))
+ncw   = off(pick(NQ_NCW,  DOW_NCW,  GOLD_NCW,  DAX_NCW,  FTSE_NCW))
+npw   = off(pick(NQ_NPW,  DOW_NPW,  GOLD_NPW,  DAX_NPW,  FTSE_NPW))
+nflip = off(pick(NQ_NF,   DOW_NF,   GOLD_NF,   DAX_NF,   FTSE_NF))
+mp    = off(pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP))
+spotL = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
+em    = pick(NQ_EM,   DOW_EM,   GOLD_EM,   DAX_EM,   FTSE_EM)
 
-var line lF = na
-var line lC = na
-var line lP = na
-var line lM = na
+distPct = flip > 0 ? (close - flip) / flip * 100 : na
+reg = flip <= 0 ? -99 : math.abs(distPct) < neutralPct ? 0 : distPct > 0 ? 1 : -1
+bgcolor(showReg and reg != -99 ? (reg == 1 ? color.new(color.green, 93) : reg == -1 ? color.new(color.red, 93) : color.new(color.gray, 90)) : na)
+
+levTime = timestamp("GMT", LEV_Y, LEV_M, LEV_D, 23, 59)
+isStale = (timenow - levTime) > 1000 * 60 * 60 * 36
+
+var line  lF = na, var line lC = na, var line lP = na, var line lC2 = na, var line lP2 = na
+var line  lNC = na, var line lNP = na, var line lNF = na, var line lM = na
+var line  lE1 = na, var line lE2 = na
 var label lab = na
 if barstate.islast
-    line.delete(lF)
-    line.delete(lC)
-    line.delete(lP)
-    line.delete(lM)
+    line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lC2), line.delete(lP2)
+    line.delete(lNC), line.delete(lNP), line.delete(lNF), line.delete(lM)
+    line.delete(lE1), line.delete(lE2)
     label.delete(lab)
     x1 = bar_index - 400
-    if flip > 0
+    if showFlip and flip > 0
         lF := line.new(x1, flip, bar_index, flip, color = color.yellow, width = 2, extend = extend.right)
-    if cw > 0
-        lC := line.new(x1, cw,   bar_index, cw,   color = color.red,    width = 2, extend = extend.right)
-    if pw > 0
-        lP := line.new(x1, pw,   bar_index, pw,   color = color.green,  width = 2, extend = extend.right)
+    if showCW and cw > 0
+        lC := line.new(x1, cw, bar_index, cw, color = color.red, width = 2, extend = extend.right)
+    if showPW and pw > 0
+        lP := line.new(x1, pw, bar_index, pw, color = color.green, width = 2, extend = extend.right)
+    if showCW2 and cw2 > 0
+        lC2 := line.new(x1, cw2, bar_index, cw2, color = color.new(color.red, 45), width = 1, extend = extend.right, style = line.style_dashed)
+    if showPW2 and pw2 > 0
+        lP2 := line.new(x1, pw2, bar_index, pw2, color = color.new(color.green, 45), width = 1, extend = extend.right, style = line.style_dashed)
+    if showNCW and ncw > 0
+        lNC := line.new(x1, ncw, bar_index, ncw, color = color.orange, width = 1, extend = extend.right, style = line.style_dotted)
+    if showNPW and npw > 0
+        lNP := line.new(x1, npw, bar_index, npw, color = color.teal, width = 1, extend = extend.right, style = line.style_dotted)
+    if showNF and nflip > 0
+        lNF := line.new(x1, nflip, bar_index, nflip, color = color.new(color.yellow, 35), width = 1, extend = extend.right, style = line.style_dotted)
     if showMP and mp > 0
-        lM := line.new(x1, mp,   bar_index, mp,   color = color.gray,   width = 1, extend = extend.right, style = line.style_dotted)
-    txt = flip <= 0 ? (sel == "NONE" ? "Kein Gamma fuer dieses Symbol" : sel + ": keine Daten (spaeter)") : sel + " — " + (longG ? "LONG (Pin/Reversion)" : "SHORT (Trend/Amplify)") + "  Flip " + str.tostring(flip, format.mintick)
-    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = flip <= 0 ? color.new(color.gray, 30) : (longG ? color.new(color.green, 20) : color.new(color.red, 20)), textcolor = color.white, size = size.small)
+        lM := line.new(x1, mp, bar_index, mp, color = color.gray, width = 1, extend = extend.right, style = line.style_dotted)
+    if showEM and em > 0 and spotL > 0
+        lE1 := line.new(x1, spotL + em + offset, bar_index, spotL + em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
+        lE2 := line.new(x1, spotL - em + offset, bar_index, spotL - em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
+    regTxt = reg == 1 ? "LONG-GAMMA (Pin/Reversion)" : reg == -1 ? "SHORT-GAMMA (Trend/Amplify)" : reg == 0 ? "FLIP-ZONE (kein Signal)" : "keine Daten"
+    txt = sel + " — " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET — build_seed laufen lassen !!" : "")
+    lab := label.new(bar_index, high, txt, style = label.style_label_left, color = isStale ? color.new(color.orange, 10) : reg == 1 ? color.new(color.green, 25) : reg == -1 ? color.new(color.red, 25) : color.new(color.gray, 25), textcolor = color.white, size = size.small)
+
+// ===== ALERTS (im Alert-Dialog auswaehlbar) =====
+alertcondition(ta.crossover(close, flip),  "Gamma: Flip-Cross UP",   "Spot kreuzt Gamma-Flip nach OBEN -> Richtung Long-Gamma/Pinning")
+alertcondition(ta.crossunder(close, flip), "Gamma: Flip-Cross DOWN", "Spot kreuzt Gamma-Flip nach UNTEN -> Short-Gamma/Amplify")
+alertcondition(ta.crossunder(close, pw),   "Gamma: Put-Wall BRUCH",  "Put-Wall gebrochen -> Falltuer offen (Amplify-Risiko)")
+alertcondition(ta.crossover(close, pw),    "Gamma: Put-Wall RECLAIM", "Put-Wall von unten zurueckerobert -> Umkehr-Signatur (Dealer-Rueckkaeufe)")
+alertcondition(ta.crossover(close, cw),    "Gamma: Call-Wall Break UP", "Call-Wall ueberschritten -> meist Magnet/Pin, selten Anschluss")

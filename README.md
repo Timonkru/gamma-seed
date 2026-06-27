@@ -1,55 +1,107 @@
-# Gamma-Seed — Gamma-Level für TradingView (Pine Seed) & MT5
+# Gamma-Seed v2 — Tägliche Gamma-Level für TradingView (NQ / DOW / GOLD)
 
-Tägliche Berechnung von **Gamma-Flip / Call-Wall / Put-Wall / Max-Pain / Netto-GEX** aus Options-Open-Interest,
-publiziert in ein öffentliches GitHub-Repo im **TradingView-Pine-Seed-Format** → in Pine via `request.seed()` lesbar.
+Berechnet täglich **Gamma-Flip, Call/Put-Walls, Strike-Regal, Expected Move** aus
+echten Options-Daten (yfinance: QQQ→NQ, DIA→DOW, GLD→GOLD) und generiert den
+TradingView-Indikator `GammaLevels_auto.pine` mit eingebrannten Tages-Leveln.
 
-**Designprinzip:** provider-agnostisch. DAX/FTSE rechnen wir selbst (gratis, Eurex/ICE), US-Märkte kommen
-später über eine bezahlte Quelle (ThetaData/ORATS) — das ist *ein* zusätzliches Provider-Modul, sonst ändert sich nichts.
+## Das Drei-Schichten-Modell (Kern von v2, 2026-06-11)
+
+Das alte v1 mischte alle Laufzeiten (0–60 Tage) in eine Karte. Folge: Das
+explodierende Gamma der **heute auslaufenden** Optionen („0DTE-Schreihals")
+dominierte alles — die Walls klebten am Spot, das Regime-Label war Rauschen,
+und die Karte zerfiel im Tagesverlauf von selbst. v2 trennt drei Schichten:
+
+| Schicht | Laufzeiten | Daten | Im Chart | Halbwertszeit |
+|---|---|---|---|---|
+| **STRUKTUR** | 7–45 DTE | Über-Nacht-OI | dicke Linien (Flip gelb, CW rot, PW grün) + Regal (gestrichelt) | Tage |
+| **NAH** | 0–5 DTE | Über-Nacht-OI | gepunktet (orange/türkis, 0DTE-Flip optional) | bis ~Mittag der US-Session |
+| **0DTE-VOLUMEN** | 0–1 DTE | **heutiges** per-Strike-Volumen | ersetzt nachmittags die gepunkteten Walls | Rest des Tages |
+
+Die Struktur-Karte ist methodisch identisch zur KasseRL-QC-Historie
+(7–45 DTE, T = Handelstage/252) → Live-Level und künftige Agent-Features
+sprechen dieselbe Sprache.
+
+## Tägliche Rituale
+
+```bash
+# 1) MORGENS, ~14:00 Berlin (nach OI-Update ~12:30, VOR US-Open 15:30):
+python build_seed.py
+#    -> rechnet ALLES neu, schreibt data/*.csv + GammaLevels_auto.pine
+#    -> Datei komplett in den TradingView-Pine-Editor kopieren, Save. FERTIG.
+#    Die Level sind damit fuer den Tag EINGEFROREN.
+
+# 2) OPTIONAL NACHMITTAGS, ~16:45 Berlin (nach der 1. US-Stunde):
+python build_seed.py --intraday
+#    -> zieht NUR 0-1-DTE-Ketten, nimmt das HEUTIGE Volumen (nicht OI),
+#       aktualisiert NUR die gepunkteten 0DTE-Walls. Struktur unangetastet.
+#    -> Label zeigt "+0DTE-Vol-Update". Wieder einfuegen.
+
+# Layout-Aenderung ohne Neuberechnung (eingefrorene Level behalten):
+python regen_pine.py
+```
+
+**Eiserne Regeln:**
+- **Nie nach 15:30 Berlin voll neu rechnen.** Ab US-Open werden Spot/IV live —
+  eine Neuberechnung gewichtet das gestrige OI dem Preis hinterher
+  („preispoliert"/Repainting) und ist als Referenz wertlos. Zwischen ~12:30
+  und 15:29 liefert der Build übrigens identische Zahlen (Inputs ändern sich
+  in dem Fenster nicht) — 14:00 gibt nur Puffer + frische Karte fürs
+  Gold-14:15-Setup.
+- Die Pine-Konstanten ändern sich **nie von selbst** — jede Level-Änderung am
+  Chart kommt von einem neuen Einfügen. Live ist nur die Einfärbung
+  (Regime-Hintergrund, Label) — sie vergleicht den Kurs mit den festen Linien.
+
+## Lese-Spickzettel
+
+- **Spot unter Struktur-Flip = Short-Gamma:** Dealer verstärken Bewegungen →
+  Trend-/Expansionstage, große Kerzen, Gap-Risiko. Breaks laufen lassen,
+  Addons; jede Rally ist verdächtig, bis der Flip zurückerobert ist.
+- **Spot über Struktur-Flip = Long-Gamma:** Dealer dämpfen → Pinning Richtung
+  Call-Wall, Mean-Reversion. Ziele statt Trails, Teilgewinne an den Walls.
+- **Flip-Zone (±0,3%, grauer Hintergrund):** Niemandsland, kein Signal.
+- **Walls:** Long-Gamma = Magnete/Zäune; Short-Gamma = Falltüren, wenn sie
+  brechen (dann zählt das **Regal**: CW2/PW2 = nächste Ziel-Zone).
+- **Umkehr-Signatur** nach Kaskade: IV-Spitze + **Put-Wall-Reclaim** von unten
+  (Alert vorhanden) = Dealer-Rückkäufe laufen an.
+- **Expected Move (blau):** vom Optionsmarkt eingepreiste 1-Tages-Spanne;
+  Kaskaden-Tage laufen oft das 1,5–2-Fache.
+- Alle Linien sind in den Indikator-Einstellungen einzeln schaltbar, jeder
+  Schalter benennt Farbe + Stil. Veraltet-Warnung im Label, wenn der Build
+  vergessen wurde. 5 Alerts im Alert-Dialog.
 
 ## Dateien
-- `gex.py` — Black-Scholes-Gamma → GEX → Flip/Walls/Max-Pain (provider-agnostisch).
-- `providers.py` — Quellen: `synthetic` (Test), `eurex_dax`/`ice_ftse` (gratis, zu verdrahten), `paid_us` (später).
-- `build_seed.py` — rechnet je Index die Level, schreibt `data/*.csv` + `symbol_info/krueger_gamma.json`.
-- `GammaLevels_seed.pine` — Pine-Indikator, der die Seed-Daten liest und zeichnet.
 
-## Täglicher Lauf
-```bash
-python build_seed.py          # hängt heutige Zeile je Ticker an, schreibt symbol_info
-git add -A && git commit -m "gamma EOD update" && git push
-```
-(Später per Scheduled Task / cron nach Börsenschluss automatisieren.)
+- `build_seed.py` — Orchestrator: Morgen-Build (`main`), Nachmittags-Update
+  (`intraday_update`), Pine-Generator, Seed-CSV-Writer
+- `providers.py` — Datenquellen (yfinance aktiv; Eurex/ICE/Paid als Plan)
+- `gex.py` — GEX-Mathematik: BS-Gamma → Flip/Walls/Regal/Max-Pain/EM
+  (identisch in der KasseRL-QC-Historie verwendet)
+- `regen_pine.py` — Pine neu bauen ohne Neuberechnung
+- `compare_methods.py` — Diagnose: Methodik- vs. Markt-Effekt zerlegen
+- `GammaLevels_auto.pine` — AUTO-GENERIERT, nicht händisch editieren
+- `today_levels.txt` — Tages-Level als Text (Struktur + Nah je Index)
+- `data/*.csv`, `symbol_info/` — Pine-Seed-Format (für späteres
+  TradingView-Seed-Whitelisting; aktuell läuft alles über das Auto-Pine)
 
-## TradingView-Pine-Seed-Freischaltung (einmalig)
-1. Repo **öffentlich** auf GitHub (z. B. `gamma-seed`) mit Ordnern `data/` und `symbol_info/`.
-2. Struktur:
-   - `symbol_info/<prefix>.json` — beschreibt alle Ticker (siehe generiertes `krueger_gamma.json`).
-   - `data/<TICKER>.csv` — Zeilen `YYYYMMDDT,O,H,L,C,Vol` (hier O=H=L=C=Level), täglich.
-3. **Aktivierung beantragen** (TradingView prüft/whitelistet das Repo) — aktueller Weg laut TradingView-Doku
-   „Pine Seed": Repo nach Spezifikation anlegen und über das TradingView-Formular/den angegebenen Kontakt einreichen.
-4. Nach Freischaltung ist die Quelle als **`seed_<githubuser>_<reponame>`** ansprechbar — hier:
-   ```pine
-   request.seed("seed_Timonkru_gamma-seed", "GOLD_FLIP", close)
-   ```
-   → im Indikator `GammaLevels_seed.pine` ist `src` bereits auf `seed_Timonkru_gamma-seed` gesetzt.
-   Repo: https://github.com/Timonkru/gamma-seed (public, Branch `main`).
+## Grenzen (ehrlich)
 
-> Hinweis: Seed-Daten sind **EOD/daily** und werden bei jedem Push aktualisiert — genau richtig, weil OI
-> ohnehin erst nach Börsenschluss publiziert wird.
+- **0DTE-Blindfleck:** Heute eröffnete 0DTE-Positionen stehen in keinem OI —
+  der `--intraday`-Volumen-Proxy ist die Gratis-Näherung (Validierung
+  2026-06-10: Volumen-CW 29.167 traf das NQ-Tageshoch 29.17 exakt).
+- **Vorzeichen-Konvention** (Dealer long Calls / short Puts) ist eine
+  Modell-Annahme — GEX ist eine Schätzung, kein Kontoauszug.
+- **DIA** liefert via yfinance öfter keine 0–1-DTE-Daten (`[skip]` ist normal,
+  alte Werte bleiben dann stehen).
+- ETF-Proxies (QQQ/DIA/GLD) ≈ Index-Gamma; SPX/NDX-Indexoptionen fehlen.
+  Skalierung ETF→Index über das Tages-Verhältnis der Schlusskurse.
+- Vor US-Open liefert yfinance gestrige Schluss-IVs/Spots — deshalb sind alle
+  Vor-Open-Läufe gleichwertig.
 
-## DAX/FTSE echt verdrahten (nächster Schritt, gratis)
-In `providers.py` die `eurex_dax`/`ice_ftse`-Platzhalter füllen:
-1. Tages-OI/Settlement-File ziehen (Eurex ODAX / ICE FTSE-Optionen).
-2. Spalten mappen: Strike, Call/Put, OI, Settlement → **IV invertieren** (oder ATM-IV als Näherung).
-3. Spot (Cash) + `T=(Expiry-heute)/252`, `mult` (DAX 5 / FTSE 10).
-4. `Chain(df, spot, label, currency)` zurückgeben — Rest läuft unverändert.
+## Ausbau-Ideen
 
-## US später (bezahlt, ein Modul)
-`paid_us(symbol)` mit ThetaData/ORATS/Polygon füllen (QQQ/NDX, SPY/SPX, DIA, GLD; `mult=100`, USD),
-dann in `build_seed.CONFIG` die Zeilen `("NDX",...)`, `("GOLD",...)` aktivieren. Sonst nichts ändern.
-
-## MT5-Nutzung (parallel)
-`data/*.csv` bzw. eine schlanke `gamma_levels.csv` kann der MT5-EA direkt lesen → Gamma-Level in die
-Ausführung (Upwork-Gold-EA), ohne Umweg über TradingView.
-
-> **Vorzeichen-Annahme:** Call-Gamma +, Put-Gamma − (Dealer long Call / short Put). Das ist die übliche,
-> aber eine *Modell*-Annahme — verschiedene Anbieter rechnen anders. Bewusst bleiben.
+- SPY→SPX als vierter Index (eine CONFIG-Zeile)
+- Beide Läufe als Windows-Aufgabe (14:00 / 16:45 werktags) automatisieren
+- OPEX-Karte (nur Monats-Verfall) in der Woche vor dem 3. Freitag
+- Eurex-DAX / ICE-FTSE (bezahlte OI-Files) → `providers.py`-Platzhalter
+- TradingView-Pine-Seed-Whitelisting (Repo public → `request.seed(...)`),
+  dann entfällt das tägliche Copy-Paste
