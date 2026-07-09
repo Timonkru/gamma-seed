@@ -1,8 +1,16 @@
-# Gamma-Seed v2 — Tägliche Gamma-Level für TradingView (NQ / DOW / GOLD)
+# Gamma-Seed v2 — Tägliche Gamma-Level für TradingView (DAX / NQ / DOW / GOLD)
 
-Berechnet täglich **Gamma-Flip, Call/Put-Walls, Strike-Regal, Expected Move** aus
-echten Options-Daten (yfinance: QQQ→NQ, DIA→DOW, GLD→GOLD) und generiert den
-TradingView-Indikator `GammaLevels_auto.pine` mit eingebrannten Tages-Leveln.
+Berechnet täglich **Gamma-Flip, Call/Put-Walls, Strike-Regal, Max Pain, Expected
+Move** aus echten Options-Daten und generiert den TradingView-Indikator
+`GammaLevels_auto.pine` mit eingebrannten Tages-Leveln.
+
+Datenquellen:
+- **US** (NQ/DOW/GOLD): yfinance-ETF-Proxies QQQ→NQ, DIA→DOW, GLD→GOLD
+- **DAX**: echte **ODAX-Indexoptionen** direkt von der öffentlichen
+  Eurex-Statistik-API (Settlement + Open Interest je Strike, gratis, kein
+  Account) — IV wird je Strike aus dem Settlement-Preis invertiert.
+  Kein ETF-Umweg, Strikes = Indexpunkte. (FTSE: geparkt — ICE schützt seine
+  Daten hinter Cloudflare; DAX-Karte dient als EU-Regime-Proxy.)
 
 ## Das Drei-Schichten-Modell (Kern von v2, 2026-06-11)
 
@@ -24,17 +32,26 @@ sprechen dieselbe Sprache.
 ## Tägliche Rituale
 
 ```bash
-# 1) MORGENS, ~14:00 Berlin (nach OI-Update ~12:30, VOR US-Open 15:30):
-python build_seed.py
-#    -> rechnet ALLES neu, schreibt data/*.csv + GammaLevels_auto.pine
-#    -> Datei komplett in den TradingView-Pine-Editor kopieren, Save. FERTIG.
-#    Die Level sind damit fuer den Tag EINGEFROREN.
+# EINFACHSTER WEG: Doppelklick auf die nummerierten .bat-Dateien im Ordner.
+# Jede .bat laesst den Lauf laufen und legt den Pine-Code automatisch in die
+# ZWISCHENABLAGE -> im TradingView-Pine-Editor nur noch Strg+A, Strg+V, Save.
 
-# 2) OPTIONAL NACHMITTAGS, ~16:45 Berlin (nach der 1. US-Stunde):
+# 1) 1_gamma_morgen_eu.bat      ~08:30 Berlin (VOR DAX-Open 09:00)
+python build_seed.py --eu
+#    -> NUR DAX frisch (Eurex-EOD von gestern, ueber Nacht publiziert).
+#       US-Linien bleiben Vortags-Stand. Check: "[eurex] ... Stand YYYYMMDD"
+#       muss den VORTAG zeigen. Pine einfuegen, EU-Karte einfrieren.
+
+# 2) 2_gamma_mittag_voll.bat    ~14:00 Berlin (nach US-OI-Update ~12:30, VOR US-Open)
+python build_seed.py
+#    -> rechnet ALLES neu (US frisch; DAX identisch zum Morgenlauf, weil die
+#       Eurex-Quelle nur 1x/Tag updated -> KEIN Repaint moeglich).
+#    -> Pine einfuegen. Level fuer den Tag EINGEFROREN.
+
+# 3) 3_gamma_0dte_update.bat    optional ~16:45 Berlin (nach der 1. US-Stunde)
 python build_seed.py --intraday
-#    -> zieht NUR 0-1-DTE-Ketten, nimmt das HEUTIGE Volumen (nicht OI),
-#       aktualisiert NUR die gepunkteten 0DTE-Walls. Struktur unangetastet.
-#    -> Label zeigt "+0DTE-Vol-Update". Wieder einfuegen.
+#    -> NUR die gepunkteten 0DTE-Walls aus dem HEUTIGEN US-Volumen.
+#       Struktur + DAX unangetastet. Label zeigt "+0DTE-Vol-Update".
 
 # Layout-Aenderung ohne Neuberechnung (eingefrorene Level behalten):
 python regen_pine.py
@@ -71,9 +88,13 @@ python regen_pine.py
 
 ## Dateien
 
-- `build_seed.py` — Orchestrator: Morgen-Build (`main`), Nachmittags-Update
-  (`intraday_update`), Pine-Generator, Seed-CSV-Writer
-- `providers.py` — Datenquellen (yfinance aktiv; Eurex/ICE/Paid als Plan)
+- `1_gamma_morgen_eu.bat` / `2_gamma_mittag_voll.bat` / `3_gamma_0dte_update.bat`
+  — Doppelklick-Rituale; legen den Pine-Code automatisch in die Zwischenablage
+- `build_seed.py` — Orchestrator: EU-Morgenlauf (`--eu`, nur DAX), voller Lauf
+  (`main`), 0DTE-Update (`--intraday`), Pine-Generator, Seed-CSV-Writer
+- `providers.py` — Datenquellen: yfinance (US-ETFs) + `eurex_dax()` Web-API
+  (ODAX gratis; Datei-Modus als Fallback); ICE-FTSE/Paid als Platzhalter
+- `eurex_selftest.py` — validiert die Eurex-Datei-Kette (Parser + IV-Inversion)
 - `gex.py` — GEX-Mathematik: BS-Gamma → Flip/Walls/Regal/Max-Pain/EM
   (identisch in der KasseRL-QC-Historie verwendet)
 - `regen_pine.py` — Pine neu bauen ohne Neuberechnung
@@ -99,9 +120,12 @@ python regen_pine.py
 
 ## Ausbau-Ideen
 
-- SPY→SPX als vierter Index (eine CONFIG-Zeile)
-- Beide Läufe als Windows-Aufgabe (14:00 / 16:45 werktags) automatisieren
+- SPY→SPX als vierter US-Index (eine CONFIG-Zeile)
+- Die drei .bat-Läufe als Windows-Aufgabe automatisieren
+  (08:30 `--eu` / 14:00 voll / 16:45 `--intraday`, werktags)
 - OPEX-Karte (nur Monats-Verfall) in der Woche vor dem 3. Freitag
-- Eurex-DAX / ICE-FTSE (bezahlte OI-Files) → `providers.py`-Platzhalter
+- FTSE aktivieren, falls je gewünscht: ICE blockt Skripte per Cloudflare →
+  Weg wäre Databento (IFEU-Feed), `providers.py` hat den Slot. Vorher prüfen,
+  ob EU-Gamma live überhaupt trägt (DAX-Karte 2–3 Wochen als Proxy testen).
 - TradingView-Pine-Seed-Whitelisting (Repo public → `request.seed(...)`),
   dann entfällt das tägliche Copy-Paste

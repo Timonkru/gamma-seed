@@ -100,24 +100,189 @@ def index_spot(symbol):
     return float(close.iloc[-1])
 
 
-# ---------- DAX (Eurex) — bezahlt/spaeter (Databento/MD+S), GRATIS-OI existiert nicht ----------
-def eurex_dax(date=None):
+# ---------- DAX (Eurex ODAX) — GRATIS aus Eurex-Tagesfile, IV selbst invertieren ----------
+from pathlib import Path as _Path
+
+# Spalten-Mapping: erst Fuzzy-Suche, dann diese Overrides (sobald das echte File-Format
+# bekannt ist, hier die exakten Eurex-Spaltennamen eintragen -> dann ist es gelockt).
+EUREX_COLMAP = {
+    "strike": None,      # z.B. "StrikePrice" / "Basispreis"
+    "cp": None,          # Call/Put-Indikator, z.B. "PutOrCall" / "C/P"
+    "oi": None,          # Open Interest
+    "price": None,       # Daily Settlement Price
+    "expiry": None,      # Verfalldatum / Maturity
+}
+
+
+def _find_col(raw_cols, keys, override=None):
+    if override and override in raw_cols:
+        return override
+    low = {c.lower().strip(): c for c in raw_cols}
+    for k in keys:
+        for lc, orig in low.items():
+            if k in lc:
+                return orig
+    return None
+
+
+def _norm_cp(v):
+    s = str(v).strip().upper()
+    if s.startswith("C") or s in ("1", "CALL"):
+        return "C"
+    if s.startswith("P") or s in ("0", "-1", "PUT"):
+        return "P"
+    return None
+
+
+def _eurex_api(url):
+    import json
+    import urllib.request
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    return json.load(urllib.request.urlopen(req, timeout=30))
+
+
+def eurex_dax(path=None, spot=None, mult=5.0, currency="EUR",
+              max_days=45, min_days=0, product_id=70044):
     """
-    PLAN (noch zu verdrahten, sobald wir das echte Eurex-File haben):
-      1) Eurex publiziert taegliche OI/Settlement je Serie (Produkt ODAX = DAX-Optionen).
-         Quelle: eurex.com -> Market Data -> Statistics / 'Open Interest' Tagesfiles (CSV),
-         oder T7 EOB-Files. -> Spalten: Strike, Call/Put, Settlement-Preis, OI, Expiry.
-      2) IV je Strike: aus dem Settlement-Preis per Black-Scholes invertieren (oder ATM-IV
-         aus der Naehe nehmen und als Flat anwenden -> erste Naeherung).
-      3) Spot = DAX-Cash bei Berechnung; T = (Expiry - heute)/252.
-      4) Nur den naechsten relevanten Verfall nehmen (3. Freitag) oder mehrere aggregieren.
-      5) Auf Chain-Schema mappen: strike,type,oi,iv,T,mult(=5) -> Chain zurueckgeben.
-    Bis dahin: Platzhalter.
+    DAX-Optionen (ODAX) — GRATIS direkt von der oeffentlichen Eurex-Statistik-API
+    (dieselben EOD-Daten wie der 'Statistics'-Tab der Produktseite, entdeckt 2026-07-06):
+      Uebersicht: eurex.com/api/v1/overallstatistics/70044
+                  -> Verfaelle (W/M) + DAX-Schlusskurs + juengster Handelstag
+      Detail:     ...?filtertype=detail&productdate=YYYYMMDD&busdate=YYYYMMDD&contracttype=X
+                  -> je Strike: OI, Volumen, Daily-Settlement-Preis (Call+Put)
+    IV je Strike aus dem Settlement invertiert (gex.implied_vol; T der Inversion ab
+    busdate, T der Gamma-Berechnung ab HEUTE). KEIN ETF-Scaling (Strikes = Indexpunkte,
+    mult=5). Kein Account/Token noetig. path=<csv> erzwingt den alten Datei-Modus;
+    bei Web-Fehler wird automatisch auf ein vorhandenes File zurueckgefallen.
     """
-    raise NotImplementedError(
-        "eurex_dax: Eurex-ODAX-OI-File einlesen (Strike/Call-Put/OI/Settlement/Expiry) "
-        "-> IV invertieren -> Chain(mult=5, currency='EUR'). Siehe Docstring."
-    )
+    if path is not None:
+        return _eurex_dax_file(path, spot, mult, currency, max_days, min_days)
+    try:
+        return _eurex_dax_web(spot, mult, currency, max_days, min_days, product_id)
+    except Exception as e:
+        d = _Path(__file__).resolve().parent / "data" / "eurex"
+        files = sorted(d.glob("*.csv")) if d.exists() else []
+        if files:
+            print(f"[warn] eurex_dax: Web-API fehlgeschlagen ({e}) -> Datei-Fallback {files[-1].name}")
+            return _eurex_dax_file(files[-1], spot, mult, currency, max_days, min_days)
+        raise
+
+
+def _eurex_dax_web(spot, mult, currency, max_days, min_days, product_id):
+    import time
+    import gex
+    from datetime import datetime, timezone
+
+    base = f"https://www.eurex.com/api/v1/overallstatistics/{product_id}"
+    ov = _eurex_api(base)
+    hdr = ov["header"]
+    if spot is None:
+        spot = float(hdr["underlyingClosingPrice"])
+    # juengster Handelstag: "03-07-2026 12:00" -> 20260703
+    d_, m_, y_ = hdr["tradingDates"][0].split(" ")[0].split("-")
+    busdate = f"{y_}{m_}{d_}"
+    bus_d = pd.Timestamp(f"{y_}-{m_}-{d_}").date()
+    today = datetime.now(timezone.utc).date()
+
+    rows = []
+    for rm in ov["dataRows"]:
+        exp_s = str(rm["date"])
+        ctype = str(rm.get("contractType", "M"))
+        if ctype == "F":                                   # Flex ueberspringen
+            continue
+        if float(rm.get("callOpenInterest", 0)) + float(rm.get("putOpenInterest", 0)) <= 0:
+            continue
+        exp = pd.Timestamp(exp_s).date()
+        dte = (exp - today).days
+        if dte < min_days or dte > max_days:
+            continue
+        T_gamma = max(np.busday_count(today, exp), 0.5) / 252.0    # fuer Gamma (ab heute)
+        T_inv = max(np.busday_count(bus_d, exp), 0.5) / 252.0      # fuer IV (ab Datenstand)
+        det = _eurex_api(f"{base}?filtertype=detail&productdate={exp_s}"
+                         f"&busdate={busdate}&contracttype={ctype}")
+        for key, typ in (("dataRowsCall", "C"), ("dataRowsPut", "P")):
+            for r in det.get(key, []):
+                K = float(r.get("strike", 0) or 0)
+                oi = float(r.get("openInterest", 0) or 0)
+                vol = float(r.get("volume", 0) or 0)
+                px = float(r.get("dSettle", 0) or 0)
+                if K <= 0 or (oi <= 0 and vol <= 0) or px <= 0:
+                    continue
+                iv = gex.implied_vol(px, spot, K, T_inv, typ)
+                rows.append((K, typ, oi, iv, T_gamma, mult, dte, vol))
+        time.sleep(0.25)                                   # API nicht hammern
+
+    if not rows:
+        raise RuntimeError("eurex_dax_web: keine Optionsreihen erhalten (API-Format geaendert?)")
+    df = pd.DataFrame(rows, columns=["strike", "type", "oi", "iv", "T", "mult", "dte", "vol"])
+    near = df.loc[(df["strike"] - spot).abs().sort_values().index[:12], "iv"].dropna()
+    atm_iv = float(near.median()) if len(near) else 0.18
+    df["iv"] = df["iv"].fillna(atm_iv)
+    print(f"[eurex] ODAX via Web-API: {len(df)} Reihen, {df['dte'].nunique()} Verfaelle, "
+          f"Spot {spot:.0f} (Stand {busdate})")
+    return Chain(df=df, spot=float(spot), label="DAX(ODAX)", currency=currency)
+
+
+def _eurex_dax_file(path, spot=None, mult=5.0, currency="EUR",
+                    max_days=45, min_days=0, third_friday_only=False):
+    """Datei-Modus (Fallback): Eurex-ODAX-Tagesfile (Strike, Call/Put, Settlement, OI,
+    Expiry) einlesen. IV aus Settlement invertiert wie im Web-Modus."""
+    import gex
+    from datetime import datetime, timezone
+    raw = pd.read_csv(path, sep=None, engine="python")
+    cols = list(raw.columns)
+    c_strike = _find_col(cols, ["strike", "exercise", "basispreis"], EUREX_COLMAP["strike"])
+    c_cp = _find_col(cols, ["putorcall", "call/put", "c/p", "p/c", "optiontype", "callput", "type"], EUREX_COLMAP["cp"])
+    c_oi = _find_col(cols, ["open interest", "openinterest", "open_interest", "oi"], EUREX_COLMAP["oi"])
+    c_px = _find_col(cols, ["settlement", "settle", "dailysettle", "settlpric", "price"], EUREX_COLMAP["price"])
+    c_exp = _find_col(cols, ["expiry", "expiration", "maturity", "verfall", "matdate", "contractdate"], EUREX_COLMAP["expiry"])
+    missing = [n for n, c in [("strike", c_strike), ("cp", c_cp), ("oi", c_oi),
+                              ("price", c_px), ("expiry", c_exp)] if c is None]
+    if missing:
+        raise RuntimeError(
+            f"eurex_dax: Spalten {missing} nicht erkannt. Datei-Spalten = {cols}. "
+            "Trag die echten Namen in EUREX_COLMAP ein (oben in providers.py).")
+
+    if spot is None:
+        spot = index_spot("^GDAXI")
+    today = datetime.now(timezone.utc).date()
+
+    rows = []
+    for _, r in raw.iterrows():
+        cp = _norm_cp(r[c_cp])
+        if cp is None:
+            continue
+        try:
+            K = float(r[c_strike]); oi = float(r[c_oi]); px = float(r[c_px])
+        except (TypeError, ValueError):
+            continue
+        if oi <= 0 or K <= 0:
+            continue
+        ed = pd.to_datetime(r[c_exp], errors="coerce", dayfirst=False)
+        if pd.isna(ed):
+            continue
+        ed = ed.date()
+        dte = (ed - today).days
+        if dte < min_days or dte > max_days:
+            continue
+        if third_friday_only and not (15 <= ed.day <= 21 and ed.weekday() == 4):
+            continue
+        T = max(np.busday_count(today, ed), 0.5) / 252.0
+        rows.append((K, cp, oi, px, T, mult, dte))
+
+    if not rows:
+        raise RuntimeError(f"eurex_dax: keine gueltigen Zeilen aus {path} (Filter/Format?).")
+    df = pd.DataFrame(rows, columns=["strike", "type", "oi", "price", "T", "mult", "dte"])
+
+    # IV je Strike aus Settlement invertieren; Fallback = flache ATM-IV
+    df["iv"] = [gex.implied_vol(p, spot, k, t, ty)
+                for p, k, t, ty in zip(df["price"], df["strike"], df["T"], df["type"])]
+    near = df.loc[(df["strike"] - spot).abs().sort_values().index[:8], "iv"].dropna()
+    atm_iv = float(near.median()) if len(near) else 0.18
+    df["iv"] = df["iv"].fillna(atm_iv)
+    df["vol"] = 0.0
+    df = df.drop(columns=["price"])
+    return Chain(df=df, spot=float(spot), label="DAX(ODAX)", currency=currency)
 
 
 # ---------- FTSE (ICE) — GRATIS, selbst rechnen ----------

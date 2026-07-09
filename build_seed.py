@@ -28,8 +28,10 @@ CONFIG = [
     ("NQ",   "USD", lambda: P.yf_us("QQQ")),
     ("DOW",  "USD", lambda: P.yf_us("DIA")),
     ("GOLD", "USD", lambda: P.yf_us("GLD")),
-    # SPAETER: ("SPX", "USD", lambda: P.yf_us("SPY")),
-    # SPAETER (bezahlt): eurex_dax(), ice_ftse()
+    # DAX = direkt auf dem Index (ODAX, mult=5) -> KEIN ETF-Scaling (nicht in INDEX_SYM).
+    # Liest neuestes Eurex-File aus data/eurex/; ohne File -> sauberer Skip.
+    ("DAX",  "EUR", lambda: P.eurex_dax()),
+    # SPAETER: ("SPX", "USD", lambda: P.yf_us("SPY")), ("FTSE", "GBP", lambda: P.ice_ftse())
 ]
 
 INDEX_SYM = {"NQ": "^NDX", "DOW": "^DJI", "GOLD": "GC=F"}
@@ -279,6 +281,11 @@ def main():
             f"| CW {g(s,'call_wall'):.2f} (2nd {g(s,'call_wall2'):.2f}) "
             f"| PW {g(s,'put_wall'):.2f} (2nd {g(s,'put_wall2'):.2f}) "
             f"| EM1d ±{g(s,'exp_move_1d'):.2f} | Spot {s['spot']:.2f}")
+        if s.get("total_vanna") is not None:
+            lines.append(
+                f"{prefix:5s} FLOW   | Vanna {s['total_vanna']/1e6:+.0f}M ({s.get('vanna_flow','?')} "
+                f"@{g(s,'vanna_strike'):.0f}) | Charm {s['total_charm']/1e6:+.0f}M "
+                f"({s.get('charm_flow','?')} @{g(s,'charm_strike'):.0f})")
         if n:
             lines.append(
                 f"{prefix:5s} NAH    | CW {g(n,'call_wall'):.2f} | PW {g(n,'put_wall'):.2f} "
@@ -354,9 +361,58 @@ def intraday_update():
           f"Struktur unveraendert). In den Pine-Editor kopieren.")
 
 
+def eu_morning_update():
+    """MORGEN-RITUAL (~08:30 Berlin, vor DAX-Open 09:00): NUR DAX frisch von der
+    Eurex-API (EOD-Settlement/OI von gestern, ueber Nacht publiziert). US-Level
+    bleiben die gespeicherten vom letzten 14:00-Lauf — kein yfinance-Fetch, kein
+    Repaint-Risiko (die Eurex-Quelle updated eh nur 1x/Tag)."""
+    today = date.today()
+    levels = load_stored_levels()
+    try:
+        ch = P.eurex_dax()
+    except Exception as e:
+        print(f"[FEHLER] DAX: {e}")
+        return
+    df = ch.df
+    struct = gex.compute_levels(df[df["dte"] >= STRUCT_MIN_DTE], ch.spot)
+    near = gex.compute_levels(df[df["dte"] <= NEAR_MAX_DTE], ch.spot)
+    if struct is None:
+        print("[FEHLER] DAX: keine Struktur-Kette")
+        return
+    vals = {"FLIP": g(struct, "gamma_flip"), "CWALL": g(struct, "call_wall"),
+            "PWALL": g(struct, "put_wall"), "CWALL2": g(struct, "call_wall2"),
+            "PWALL2": g(struct, "put_wall2"), "NCWALL": g(near, "call_wall"),
+            "NPWALL": g(near, "put_wall"), "NFLIP": g(near, "gamma_flip"),
+            "MAXPAIN": g(struct, "max_pain"), "EM1D": g(struct, "exp_move_1d"),
+            "GEXBN": struct["total_gex"] / 1e9, "SPOT": struct["spot"]}
+    for m in METRICS:
+        append_row(f"DAX_{m}", today, vals[m])
+    levels["DAX"] = {"flip": g(struct, "gamma_flip"), "cw": g(struct, "call_wall"),
+                     "pw": g(struct, "put_wall"), "cw2": g(struct, "call_wall2"),
+                     "pw2": g(struct, "put_wall2"), "ncw": g(near, "call_wall"),
+                     "npw": g(near, "put_wall"), "nflip": g(near, "gamma_flip"),
+                     "mp": g(struct, "max_pain"), "spot": struct["spot"],
+                     "em": g(struct, "exp_move_1d")}
+    print(f"DAX   spot {struct['spot']:.0f} | {struct['regime'].upper():7s} "
+          f"| Flip {g(struct,'gamma_flip'):.0f} ({struct['dist_to_flip_pct'] or 0:+.2f}%) "
+          f"| CW {g(struct,'call_wall'):.0f}/{g(struct,'call_wall2'):.0f} "
+          f"| PW {g(struct,'put_wall'):.0f}/{g(struct,'put_wall2'):.0f} "
+          f"| EM1d ±{g(struct,'exp_move_1d'):.0f} "
+          f"| Nah-CW {g(near,'call_wall'):.0f} Nah-PW {g(near,'put_wall'):.0f}")
+    if struct.get("total_vanna") is not None:
+        print(f"DAX   FLOW | Vanna {struct['total_vanna']/1e6:+.0f}M ({struct['vanna_flow']} "
+              f"@{g(struct,'vanna_strike'):.0f}) | Charm {struct['total_charm']/1e6:+.0f}M "
+              f"({struct['charm_flow']} @{g(struct,'charm_strike'):.0f})")
+    out = gen_auto_pine(levels, today, note=" EU-Morgenlauf (US=Vortag)")
+    print(f"\nPine aktualisiert -> {out}")
+    print("   => In den Pine-Editor kopieren. US-Linien = Stand Vortag, um 14:00 vollen Lauf machen.")
+
+
 if __name__ == "__main__":
     import sys
     if "--intraday" in sys.argv:
         intraday_update()
+    elif "--eu" in sys.argv:
+        eu_morning_update()
     else:
         main()

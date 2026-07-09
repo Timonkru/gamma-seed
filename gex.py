@@ -29,11 +29,119 @@ def bs_gamma(S, K, T, sigma, r=0.0):
     return np.where(np.isfinite(g), g, 0.0)
 
 
+# ---- Black-Scholes Preis + IV-Inversion (fuer Quellen mit Settlement-PREIS statt IV,
+#      z.B. Eurex/ICE). Spot-basiert, r=0 -> konsistent zur Gamma-Konvention oben. ----
+import math
+
+
+def _Ncdf(x):
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def bs_price(S, K, T, sigma, typ, r=0.0):
+    """Europaeischer BS-Preis (Call/Put). sigma<=0 oder T<=0 -> innerer Wert."""
+    if sigma <= 0 or T <= 0 or S <= 0 or K <= 0:
+        return max(S - K, 0.0) if typ == "C" else max(K - S, 0.0)
+    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    if typ == "C":
+        return S * _Ncdf(d1) - K * math.exp(-r * T) * _Ncdf(d2)
+    return K * math.exp(-r * T) * _Ncdf(-d2) - S * _Ncdf(-d1)
+
+
+def implied_vol(price, S, K, T, typ, r=0.0, lo=1e-4, hi=5.0, tol=1e-5, it=80):
+    """IV per Bisektion aus dem Optionspreis. None wenn kein Wurzel-Bracket
+    (Preis unter innerem Wert / numerisch unmoeglich)."""
+    if price is None or T <= 0 or S <= 0 or K <= 0:
+        return None
+    intrinsic = max(S - K, 0.0) if typ == "C" else max(K - S, 0.0)
+    if price <= intrinsic + 1e-9:
+        return None
+    fa = bs_price(S, K, T, lo, typ, r) - price
+    fb = bs_price(S, K, T, hi, typ, r) - price
+    if fa * fb > 0:
+        return None
+    a, b = lo, hi
+    for _ in range(it):
+        m = 0.5 * (a + b)
+        fm = bs_price(S, K, T, m, typ, r) - price
+        if abs(fm) < tol:
+            return m
+        if fa * fm < 0:
+            b = m
+        else:
+            a, fa = m, fm
+    return 0.5 * (a + b)
+
+
 def _signed_gex_at(chain, S, r=0.0):
     """GEX je Option bei hypothetischem Spot S ($ pro 1%-Move). Call +, Put -."""
     g = bs_gamma(S, chain["strike"].values, chain["T"].values, chain["iv"].values, r)
     sign = np.where(chain["type"].values == "C", 1.0, -1.0)
     return sign * g * chain["oi"].values * chain["mult"].values * (S ** 2) * 0.01
+
+
+# ---- Charm & Vanna (2nd-order Greeks, r=0). Bei q=r=0 sind Vanna und Charm fuer
+#      Call und Put desselben Strikes IDENTISCH -> Dealer-Aggregation nutzt dieselbe
+#      Vorzeichen-Konvention wie GEX (long Call, short Put). Nur ein Modell-Schaetzer! ----
+def _d1d2(S, K, T, sigma, r=0.0):
+    with np.errstate(divide="ignore", invalid="ignore"):
+        srt = sigma * np.sqrt(T)
+        d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / srt
+        d2 = d1 - srt
+    return d1, d2, srt
+
+
+def bs_vanna(S, K, T, sigma, r=0.0):
+    """dDelta/dVol (= dVega/dSpot). Positiv OTM-Call/ITM-Put-seitig. Pro 1.0 Vol (dezimal)."""
+    S = np.asarray(S, float); K = np.asarray(K, float)
+    T = np.asarray(T, float); sigma = np.asarray(sigma, float)
+    d1, d2, _ = _d1d2(S, K, T, sigma, r)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        v = -_npdf(d1) * d2 / sigma
+    return np.where(np.isfinite(v), v, 0.0)
+
+
+def bs_charm(S, K, T, sigma, r=0.0):
+    """dDelta/dt (Zeit vergeht, T sinkt), pro JAHR. r=0 -> phi(d1)*d2/(2T)."""
+    S = np.asarray(S, float); K = np.asarray(K, float)
+    T = np.asarray(T, float); sigma = np.asarray(sigma, float)
+    d1, d2, srt = _d1d2(S, K, T, sigma, r)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c = -_npdf(d1) * (2.0 * r * T - d2 * srt) / (2.0 * T * srt)
+    return np.where(np.isfinite(c), c, 0.0)
+
+
+def _signed_vanna_at(chain, S, r=0.0):
+    """Dealer-Vanna-Exposure je Option: $-Delta-Verschiebung pro 1 Vol-PUNKT (0.01)."""
+    v = bs_vanna(S, chain["strike"].values, chain["T"].values, chain["iv"].values, r)
+    sign = np.where(chain["type"].values == "C", 1.0, -1.0)
+    return sign * v * chain["oi"].values * chain["mult"].values * S * 0.01
+
+
+def _signed_charm_at(chain, S, r=0.0):
+    """Dealer-Charm-Exposure je Option: $-Delta-Verschiebung pro HANDELSTAG (Jahr/252)."""
+    c = bs_charm(S, chain["strike"].values, chain["T"].values, chain["iv"].values, r)
+    sign = np.where(chain["type"].values == "C", 1.0, -1.0)
+    return sign * c * chain["oi"].values * chain["mult"].values * S / 252.0
+
+
+def total_vanna(chain, S, r=0.0):
+    return float(_signed_vanna_at(chain, S, r).sum())
+
+
+def total_charm(chain, S, r=0.0):
+    return float(_signed_charm_at(chain, S, r).sum())
+
+
+def _dominant_strike(chain, vals):
+    """Strike mit der groessten |aggregierten| Exposure (die 'Wall')."""
+    agg = {}
+    for k, v in zip(chain["strike"].values, vals):
+        agg[k] = agg.get(k, 0.0) + v
+    if not agg:
+        return None
+    return float(max(agg, key=lambda k: abs(agg[k])))
 
 
 def total_gex(chain, S, r=0.0):
@@ -115,6 +223,11 @@ def compute_levels(chain, spot, r=0.0, neutral_pct=0.3):
     atm = chain.loc[(chain["strike"] - spot).abs().sort_values().index[:6], "iv"]
     atm_iv = float(atm.median()) if len(atm) else None
     em_1d = (spot * atm_iv / np.sqrt(252.0)) if atm_iv else None
+    # Charm & Vanna (Netto-Dealer-Flow-Richtung + dominanter Strike)
+    tv = total_vanna(chain, spot, r)
+    tc = total_charm(chain, spot, r)
+    vanna_strike = _dominant_strike(chain, _signed_vanna_at(chain, spot, r))
+    charm_strike = _dominant_strike(chain, _signed_charm_at(chain, spot, r))
     return {
         "spot": float(spot),
         "total_gex": tg,
@@ -126,4 +239,13 @@ def compute_levels(chain, spot, r=0.0, neutral_pct=0.3):
         "atm_iv": (round(atm_iv, 4) if atm_iv else None),
         "exp_move_1d": (round(em_1d, 2) if em_1d else None),
         "dist_to_flip_pct": (round((spot - flip) / spot * 100, 2) if flip else None),
+        # Vanna>0: Vol-DOWN -> Dealer KAUFEN (Vanna-Rally-Treibstoff im Grind);
+        #          Vol-UP -> Dealer verkaufen (Abwaerts-Beschleuniger).
+        "total_vanna": tv,
+        "vanna_flow": ("Vol-down=Kauf" if tv > 0 else "Vol-down=Verkauf"),
+        "vanna_strike": vanna_strike,
+        # Charm>0: mit vergehender Zeit -> Dealer KAUFEN (Stuetze in den Verfall/OPEX).
+        "total_charm": tc,
+        "charm_flow": ("Zeit=Kauf-Stuetze" if tc > 0 else "Zeit=Verkauf-Druck"),
+        "charm_strike": charm_strike,
     }
