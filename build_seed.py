@@ -36,16 +36,19 @@ CONFIG = [
 
 INDEX_SYM = {"NQ": "^NDX", "DOW": "^DJI", "GOLD": "GC=F"}
 METRICS = ["FLIP", "CWALL", "PWALL", "CWALL2", "PWALL2", "NCWALL", "NPWALL",
-           "NFLIP", "MAXPAIN", "EM1D", "GEXBN", "SPOT"]
+           "NFLIP", "MAXPAIN", "EM1D", "GEXBN", "SPOT",
+           "VANNA", "VANNAK", "CHARM", "CHARMK"]
 DESC = {"FLIP": "Gamma Flip", "CWALL": "Call Wall", "PWALL": "Put Wall",
         "CWALL2": "Call Wall 2", "PWALL2": "Put Wall 2",
         "NCWALL": "Near Call Wall (0-5d)", "NPWALL": "Near Put Wall (0-5d)",
         "NFLIP": "Near Gamma Flip (0-5d)",
         "MAXPAIN": "Max Pain", "EM1D": "Expected Move 1d",
-        "GEXBN": "Net GEX ($bn)", "SPOT": "Underlying Spot"}
+        "GEXBN": "Net GEX ($bn)", "SPOT": "Underlying Spot",
+        "VANNA": "Total Vanna ($M)", "VANNAK": "Vanna Strike",
+        "CHARM": "Total Charm ($M)", "CHARMK": "Charm Strike"}
 
 SCALE_KEYS = ("gamma_flip", "call_wall", "call_wall2", "put_wall", "put_wall2",
-              "max_pain", "exp_move_1d")
+              "max_pain", "exp_move_1d", "vanna_strike", "charm_strike")
 
 
 def append_row(ticker, d, value):
@@ -76,10 +79,12 @@ def write_symbol_info(tickers, meta):
 
 
 AUTO_TEMPLATE = r'''//@version=6
-// Gamma Levels v2 (Auto) [KruegerAlgorithms] — AUTO-GENERIERT von build_seed.py (NICHT editieren)
+// Gamma Levels v3 (Auto) [KruegerAlgorithms] - AUTO-GENERIERT von build_seed.py (NICHT editieren)
 // STRUKTUR-Karte (7-45 DTE) = dicke Linien | NAH-Karte (0-5 DTE) = gepunktet = Tageswetter/Pinning
+// v3: Vanna/Charm-Strikes + VIX-Regime im Label (Kontext, unvalidiert - kein Signal).
+// Template ist bewusst reines ASCII (die .bat-Rituale kopieren via `clip` = ANSI).
 // Taeglich VOR US-Open: `python build_seed.py` -> Datei komplett in den Pine-Editor -> Save.
-indicator("Gamma Levels v2 (Auto) [KruegerAlgorithms]", overlay = true)
+indicator("Gamma Levels v3 (Auto) [KruegerAlgorithms]", overlay = true)
 
 // ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert __DATE__) =====
 __LEVELS__
@@ -87,24 +92,29 @@ __LEVELS__
 
 idx        = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
 offset     = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis)")
-neutralPct = input.float(0.3, "Flip-Zone (± %)", minval = 0.05, step = 0.05)
+neutralPct = input.float(0.3, "Flip-Zone (+/- %)", minval = 0.05, step = 0.05)
 showReg    = input.bool(true, "Regime-Hintergrund (gruen/rot/grau)")
 
-grpS = "STRUKTUR-Karte (7-45 DTE) — stabile Tageslinien"
-showFlip = input.bool(true,  "FLIP — gelb, dick",                        group = grpS)
-showCW   = input.bool(true,  "CALL-WALL — rot, dick",                    group = grpS)
-showPW   = input.bool(true,  "PUT-WALL — gruen, dick",                   group = grpS)
-showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) — rot, gestrichelt",   group = grpS)
-showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) — gruen, gestrichelt",  group = grpS)
+grpS = "STRUKTUR-Karte (7-45 DTE) - stabile Tageslinien"
+showFlip = input.bool(true,  "FLIP - gelb, dick",                        group = grpS)
+showCW   = input.bool(true,  "CALL-WALL - rot, dick",                    group = grpS)
+showPW   = input.bool(true,  "PUT-WALL - gruen, dick",                   group = grpS)
+showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) - rot, gestrichelt",   group = grpS)
+showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) - gruen, gestrichelt",  group = grpS)
 
-grpN = "NAH-Karte (0-5 DTE) — 0DTE-Tageswetter/Pinning"
-showNCW  = input.bool(true,  "0DTE CALL-WALL — orange, gepunktet",       group = grpN)
-showNPW  = input.bool(true,  "0DTE PUT-WALL — tuerkis, gepunktet",       group = grpN)
-showNF   = input.bool(false, "0DTE FLIP — gelb, gepunktet",              group = grpN)
+grpN = "NAH-Karte (0-5 DTE) - 0DTE-Tageswetter/Pinning"
+showNCW  = input.bool(true,  "0DTE CALL-WALL - orange, gepunktet",       group = grpN)
+showNPW  = input.bool(true,  "0DTE PUT-WALL - tuerkis, gepunktet",       group = grpN)
+showNF   = input.bool(false, "0DTE FLIP - gelb, gepunktet",              group = grpN)
 
 grpX = "Sonstiges"
-showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag — blau, gepunktet", group = grpX)
-showMP   = input.bool(false, "MAX PAIN — grau, gepunktet",               group = grpX)
+showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag - blau, gepunktet", group = grpX)
+showMP   = input.bool(false, "MAX PAIN - grau, gepunktet",               group = grpX)
+
+grpV = "FLOW & VIX (Kontext, unvalidiert - kein Trade-Signal)"
+showVanna = input.bool(true,  "VANNA-Strike - violett, gepunktet",       group = grpV)
+showCharm = input.bool(true,  "CHARM-Strike - aqua, gepunktet",          group = grpV)
+showVix   = input.bool(true,  "VIX-Regime im Label (CBOE:VIX)",          group = grpV)
 
 t = str.upper(syminfo.ticker)
 detect() =>
@@ -136,6 +146,24 @@ nflip = off(pick(NQ_NF,   DOW_NF,   GOLD_NF,   DAX_NF,   FTSE_NF))
 mp    = off(pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP))
 spotL = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 em    = pick(NQ_EM,   DOW_EM,   GOLD_EM,   DAX_EM,   FTSE_EM)
+van   = pick(NQ_VAN,  DOW_VAN,  GOLD_VAN,  DAX_VAN,  FTSE_VAN)     // Mio USD, Vorzeichen = Dealer-Konvention
+vank  = off(pick(NQ_VANK, DOW_VANK, GOLD_VANK, DAX_VANK, FTSE_VANK))
+chm   = pick(NQ_CHM,  DOW_CHM,  GOLD_CHM,  DAX_CHM,  FTSE_CHM)
+chmk  = off(pick(NQ_CHMK, DOW_CHMK, GOLD_CHMK, DAX_CHMK, FTSE_CHMK))
+
+// ---- VIX-Regime (gestriger Daily-Close = bestaetigt, kein Repaint) ----
+// Tertile relativ zu den letzten 250 Handelstagen; Tilt nach validiertem Befund:
+// hoch/steigend -> Entscheidungstag (Trend ODER Whipsaw), niedrig/fallend -> Chop.
+[vix1, vix2, vp33, vp67] = request.security("CBOE:VIX", "D",
+     [close[1], close[2],
+      ta.percentile_linear_interpolation(close[1], 250, 33.333),
+      ta.percentile_linear_interpolation(close[1], 250, 66.667)],
+     ignore_invalid_symbol = true)
+vixReg  = na(vix1) or na(vp33) ? "n/a" : vix1 <= vp33 ? "NIEDRIG" : vix1 >= vp67 ? "HOCH" : "MITTEL"
+vixDir  = na(vix1) or na(vix2) ? "" : vix1 > vix2 + 0.05 ? "steigt" : vix1 < vix2 - 0.05 ? "faellt" : "flach"
+vixTilt = vixReg == "n/a" ? "" :
+     (vixReg == "HOCH" or vixDir == "steigt") ? "Entscheidungs-Tilt (Trend/Whipsaw, wenig Chop)" :
+     (vixReg == "NIEDRIG" and vixDir != "steigt") ? "Chop-Tilt" : "neutral"
 
 distPct = flip > 0 ? (close - flip) / flip * 100 : na
 reg = flip <= 0 ? -99 : math.abs(distPct) < neutralPct ? 0 : distPct > 0 ? 1 : -1
@@ -147,11 +175,13 @@ isStale = (timenow - levTime) > 1000 * 60 * 60 * 36
 var line  lF = na, var line lC = na, var line lP = na, var line lC2 = na, var line lP2 = na
 var line  lNC = na, var line lNP = na, var line lNF = na, var line lM = na
 var line  lE1 = na, var line lE2 = na
+var line  lVA = na, var line lCH = na
 var label lab = na
 if barstate.islast
     line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lC2), line.delete(lP2)
     line.delete(lNC), line.delete(lNP), line.delete(lNF), line.delete(lM)
     line.delete(lE1), line.delete(lE2)
+    line.delete(lVA), line.delete(lCH)
     label.delete(lab)
     x1 = bar_index - 400
     if showFlip and flip > 0
@@ -175,8 +205,17 @@ if barstate.islast
     if showEM and em > 0 and spotL > 0
         lE1 := line.new(x1, spotL + em + offset, bar_index, spotL + em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
         lE2 := line.new(x1, spotL - em + offset, bar_index, spotL - em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
+    if showVanna and vank > 0
+        lVA := line.new(x1, vank, bar_index, vank, color = color.new(color.purple, 40), width = 1, extend = extend.right, style = line.style_dotted)
+    if showCharm and chmk > 0
+        lCH := line.new(x1, chmk, bar_index, chmk, color = color.new(color.aqua, 45), width = 1, extend = extend.right, style = line.style_dotted)
     regTxt = reg == 1 ? "LONG-GAMMA (Pin/Reversion)" : reg == -1 ? "SHORT-GAMMA (Trend/Amplify)" : reg == 0 ? "FLIP-ZONE (kein Signal)" : "keine Daten"
-    txt = sel + " — " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET — build_seed laufen lassen !!" : "")
+    flowTxt = (van != 0.0 or chm != 0.0) ?
+         "\nVanna " + (van > 0 ? "+" : "") + str.tostring(van, "#.#") + "M (Vol-runter=" + (van > 0 ? "KAUF" : "Verkauf") + ")" + (vank > 0 ? " @" + str.tostring(vank, format.mintick) : "") +
+         "  |  Charm " + (chm > 0 ? "+" : "") + str.tostring(chm, "#.#") + "M (" + (chm > 0 ? "Zeit=Kauf-Stuetze" : "Zeit=Verkauf-Druck") + ")" + (chmk > 0 ? " @" + str.tostring(chmk, format.mintick) : "") : ""
+    vixTxt = showVix and vixReg != "n/a" ?
+         "\nVIX " + str.tostring(vix1, "#.##") + " (" + vixReg + ", " + vixDir + ") -> " + vixTilt : ""
+    txt = sel + " - " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + flowTxt + vixTxt + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET - build_seed laufen lassen !!" : "")
     lab := label.new(bar_index, high, txt, style = label.style_label_left, color = isStale ? color.new(color.orange, 10) : reg == 1 ? color.new(color.green, 25) : reg == -1 ? color.new(color.red, 25) : color.new(color.gray, 25), textcolor = color.white, size = size.small)
 
 // ===== ALERTS (im Alert-Dialog auswaehlbar) =====
@@ -191,14 +230,17 @@ alertcondition(ta.crossover(close, cw),    "Gamma: Call-Wall Break UP", "Call-Wa
 def gen_auto_pine(levels, today, note=""):
     order = ["NQ", "DOW", "GOLD", "DAX", "FTSE"]
     zero = {k: 0.0 for k in ["flip", "cw", "pw", "cw2", "pw2", "ncw", "npw",
-                             "nflip", "mp", "spot", "em"]}
+                             "nflip", "mp", "spot", "em",
+                             "van", "vank", "chm", "chmk"]}
     lines = []
     for k in order:
         v = {**zero, **levels.get(k, {})}
         for name, key in [("FLIP", "flip"), ("CW", "cw"), ("PW", "pw"),
                           ("CW2", "cw2"), ("PW2", "pw2"), ("NCW", "ncw"),
                           ("NPW", "npw"), ("NF", "nflip"), ("MP", "mp"),
-                          ("SPOT", "spot"), ("EM", "em")]:
+                          ("SPOT", "spot"), ("EM", "em"),
+                          ("VAN", "van"), ("VANK", "vank"),
+                          ("CHM", "chm"), ("CHMK", "chmk")]:
             lines.append(f"{k}_{name} = {v[key]:.2f}")
     lines.append(f'LEV_DATE = "{today}{note}"')
     lines.append(f"LEV_Y = {today.year}")
@@ -263,7 +305,11 @@ def main():
                 "NPWALL": g(near, "put_wall"), "NFLIP": g(near, "gamma_flip"),
                 "MAXPAIN": g(struct, "max_pain"),
                 "EM1D": g(struct, "exp_move_1d"),
-                "GEXBN": struct["total_gex"] / 1e9, "SPOT": struct["spot"]}
+                "GEXBN": struct["total_gex"] / 1e9, "SPOT": struct["spot"],
+                "VANNA": (struct.get("total_vanna") or 0.0) / 1e6,
+                "VANNAK": g(struct, "vanna_strike"),
+                "CHARM": (struct.get("total_charm") or 0.0) / 1e6,
+                "CHARMK": g(struct, "charm_strike")}
         for m in METRICS:
             tk = f"{prefix}_{m}"
             tickers.append(tk)
@@ -299,7 +345,11 @@ def main():
                   "pw2": g(s, "put_wall2"), "ncw": g(n, "call_wall"),
                   "npw": g(n, "put_wall"), "nflip": g(n, "gamma_flip"),
                   "mp": g(s, "max_pain"),
-                  "spot": s["spot"], "em": g(s, "exp_move_1d")}
+                  "spot": s["spot"], "em": g(s, "exp_move_1d"),
+                  "van": (s.get("total_vanna") or 0.0) / 1e6,
+                  "vank": g(s, "vanna_strike"),
+                  "chm": (s.get("total_charm") or 0.0) / 1e6,
+                  "chmk": g(s, "charm_strike")}
               for p, s, n in copyrows}
     auto = gen_auto_pine(levels, today)
     print(f"\nAUTO-Indikator v2 regeneriert -> {auto}")
@@ -310,7 +360,8 @@ def load_stored_levels():
     """Letzte gespeicherte Tages-Level aus data/*.csv (fuer regen/intraday)."""
     m2k = {"FLIP": "flip", "CWALL": "cw", "PWALL": "pw", "CWALL2": "cw2",
            "PWALL2": "pw2", "NCWALL": "ncw", "NPWALL": "npw", "NFLIP": "nflip",
-           "MAXPAIN": "mp", "SPOT": "spot", "EM1D": "em"}
+           "MAXPAIN": "mp", "SPOT": "spot", "EM1D": "em",
+           "VANNA": "van", "VANNAK": "vank", "CHARM": "chm", "CHARMK": "chmk"}
     levels = {}
     for f in DATA.glob("*.csv"):
         parts = f.stem.split("_", 1)

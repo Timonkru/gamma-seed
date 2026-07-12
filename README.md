@@ -1,4 +1,4 @@
-# Gamma-Seed v2 — Tägliche Gamma-Level für TradingView (DAX / NQ / DOW / GOLD)
+# Gamma-Seed v3 — Tägliche Gamma-Level für TradingView (DAX / NQ / DOW / GOLD)
 
 Berechnet täglich **Gamma-Flip, Call/Put-Walls, Strike-Regal, Max Pain, Expected
 Move** aus echten Options-Daten und generiert den TradingView-Indikator
@@ -11,6 +11,20 @@ Datenquellen:
   Account) — IV wird je Strike aus dem Settlement-Preis invertiert.
   Kein ETF-Umweg, Strikes = Indexpunkte. (FTSE: geparkt — ICE schützt seine
   Daten hinter Cloudflare; DAX-Karte dient als EU-Regime-Proxy.)
+
+## Neu in v3 (2026-07-12)
+
+- **Vanna- & Charm-Strike-Linien** (violett/aqua, gepunktet) + **FLOW-Zeile im
+  Label**: Gesamt-Vanna/-Charm in $Mio mit Lesart (Vol-runter=Kauf bzw.
+  Zeit=Kauf-Stütze/Verkauf-Druck) und dominantem Strike. Gleiche
+  Dealer-Vorzeichen-Konvention wie GEX. **Unvalidiert — reiner Modellschätzer,
+  Kontext-Schicht, kein Trade-Signal.**
+- **VIX-Regime im Label** (`CBOE:VIX`, gestriger Daily-Close = kein Repaint):
+  Tertile über 250 Handelstage + Richtung → Tilt-Text
+  (hoch/steigend = Entscheidungstag, niedrig/fallend = Chop). Kontext, kein Signal.
+- **Template komplett ASCII**: `clip <` in den .bat-Ritualen kopiert ANSI —
+  Nicht-ASCII-Zeichen (—, ±) kamen als Zeichensalat in TradingView an. Das
+  Template darf nie wieder Nicht-ASCII enthalten.
 
 ## Das Drei-Schichten-Modell (Kern von v2, 2026-06-11)
 
@@ -96,7 +110,8 @@ python regen_pine.py
   (ODAX gratis; Datei-Modus als Fallback); ICE-FTSE/Paid als Platzhalter
 - `eurex_selftest.py` — validiert die Eurex-Datei-Kette (Parser + IV-Inversion)
 - `gex.py` — GEX-Mathematik: BS-Gamma → Flip/Walls/Regal/Max-Pain/EM
-  (identisch in der KasseRL-QC-Historie verwendet)
+  (identisch in der KasseRL-QC-Historie verwendet) + Vanna/Charm-Flow
+  (`bs_vanna`, `bs_charm`, dominante Strikes)
 - `regen_pine.py` — Pine neu bauen ohne Neuberechnung
 - `compare_methods.py` — Diagnose: Methodik- vs. Markt-Effekt zerlegen
 - `GammaLevels_auto.pine` — AUTO-GENERIERT, nicht händisch editieren

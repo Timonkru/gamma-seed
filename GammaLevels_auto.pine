@@ -1,54 +1,72 @@
 //@version=6
-// Gamma Levels v2 (Auto) [KruegerAlgorithms] — AUTO-GENERIERT von build_seed.py (NICHT editieren)
+// Gamma Levels v3 (Auto) [KruegerAlgorithms] - AUTO-GENERIERT von build_seed.py (NICHT editieren)
 // STRUKTUR-Karte (7-45 DTE) = dicke Linien | NAH-Karte (0-5 DTE) = gepunktet = Tageswetter/Pinning
+// v3: Vanna/Charm-Strikes + VIX-Regime im Label (Kontext, unvalidiert - kein Signal).
+// Template ist bewusst reines ASCII (die .bat-Rituale kopieren via `clip` = ANSI).
 // Taeglich VOR US-Open: `python build_seed.py` -> Datei komplett in den Pine-Editor -> Save.
-indicator("Gamma Levels v2 (Auto) [KruegerAlgorithms]", overlay = true)
+indicator("Gamma Levels v3 (Auto) [KruegerAlgorithms]", overlay = true)
 
-// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert 2026-07-09) =====
-NQ_FLIP = 29257.91
-NQ_CW = 29275.59
-NQ_PW = 29193.35
-NQ_CW2 = 29316.70
-NQ_PW2 = 29234.47
-NQ_NCW = 29275.59
-NQ_NPW = 29234.47
-NQ_NF = 29253.70
-NQ_MP = 29296.14
-NQ_SPOT = 29252.56
-NQ_EM = 1.64
-DOW_FLIP = 52340.08
-DOW_CW = 52371.42
-DOW_PW = 52271.28
-DOW_CW2 = 52571.69
-DOW_PW2 = 52171.15
-DOW_NCW = 52371.42
-DOW_NPW = 52271.28
-DOW_NF = 52337.84
-DOW_MP = 51870.74
-DOW_SPOT = 52348.39
-DOW_EM = 2.00
-GOLD_FLIP = 4125.94
-GOLD_CW = 4133.36
-GOLD_PW = 4122.34
-GOLD_CW2 = 4188.47
-GOLD_PW2 = 4111.32
-GOLD_NCW = 4133.36
-GOLD_NPW = 4100.30
-GOLD_NF = 4126.23
-GOLD_MP = 4320.74
-GOLD_SPOT = 4127.30
-GOLD_EM = 0.33
-DAX_FLIP = 24944.46
+// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert 2026-07-12) =====
+NQ_FLIP = 30005.58
+NQ_CW = 30256.34
+NQ_PW = 28776.41
+NQ_CW2 = 30420.78
+NQ_PW2 = 27954.23
+NQ_NCW = 30009.69
+NQ_NPW = 29434.16
+NQ_NF = 29664.22
+NQ_MP = 29393.05
+NQ_SPOT = 29825.11
+NQ_EM = 401.64
+NQ_VAN = 614.84
+NQ_VANK = 27954.23
+NQ_CHM = -441.06
+NQ_CHMK = 26720.96
+DOW_FLIP = 52024.71
+DOW_CW = 53059.48
+DOW_PW = 50056.12
+DOW_CW2 = 54060.60
+DOW_PW2 = 48554.43
+DOW_NCW = 0.00
+DOW_NPW = 0.00
+DOW_NF = 0.00
+DOW_MP = 52058.36
+DOW_SPOT = 52637.01
+DOW_EM = 367.41
+DOW_VAN = 33.22
+DOW_VANK = 55061.73
+DOW_CHM = -17.17
+DOW_CHMK = 55061.73
+GOLD_FLIP = 4108.77
+GOLD_CW = 4354.37
+GOLD_PW = 3918.93
+GOLD_CW2 = 4517.66
+GOLD_PW2 = 4082.22
+GOLD_NCW = 4136.65
+GOLD_NPW = 4060.45
+GOLD_NF = 4082.57
+GOLD_MP = 4191.08
+GOLD_SPOT = 4104.10
+GOLD_EM = 53.56
+GOLD_VAN = 50.51
+GOLD_VANK = 4354.37
+GOLD_CHM = -37.96
+GOLD_CHMK = 4354.37
+DAX_FLIP = 24991.02
 DAX_CW = 26000.00
 DAX_PW = 24500.00
-DAX_CW2 = 25200.00
-DAX_PW2 = 24200.00
-DAX_NCW = 24950.00
-DAX_NPW = 24650.00
-DAX_NF = 25165.89
-DAX_MP = 24950.00
-DAX_SPOT = 24897.45
-DAX_EM = 267.63
+DAX_CW2 = 25400.00
+DAX_PW2 = 24900.00
+DAX_NCW = 0.00
+DAX_NPW = 0.00
+DAX_NF = 0.00
+DAX_MP = 25000.00
+DAX_SPOT = 25118.27
+DAX_EM = 236.87
+DAX_VAN = 107.33
+DAX_VANK = 26000.00
+DAX_CHM = -44.64
+DAX_CHMK = 26000.00
 FTSE_FLIP = 0.00
 FTSE_CW = 0.00
 FTSE_PW = 0.00
@@ -60,32 +78,41 @@ FTSE_NF = 0.00
 FTSE_MP = 0.00
 FTSE_SPOT = 0.00
 FTSE_EM = 0.00
-LEV_DATE = "2026-07-09 EU-Morgenlauf (US=Vortag)"
+FTSE_VAN = 0.00
+FTSE_VANK = 0.00
+FTSE_CHM = 0.00
+FTSE_CHMK = 0.00
+LEV_DATE = "2026-07-12"
 LEV_Y = 2026
 LEV_M = 7
-LEV_D = 9
+LEV_D = 12
 // ==================================================================
 
 idx        = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
 offset     = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis)")
-neutralPct = input.float(0.3, "Flip-Zone (± %)", minval = 0.05, step = 0.05)
+neutralPct = input.float(0.3, "Flip-Zone (+/- %)", minval = 0.05, step = 0.05)
 showReg    = input.bool(true, "Regime-Hintergrund (gruen/rot/grau)")
 
-grpS = "STRUKTUR-Karte (7-45 DTE) — stabile Tageslinien"
-showFlip = input.bool(true,  "FLIP — gelb, dick",                        group = grpS)
-showCW   = input.bool(true,  "CALL-WALL — rot, dick",                    group = grpS)
-showPW   = input.bool(true,  "PUT-WALL — gruen, dick",                   group = grpS)
-showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) — rot, gestrichelt",   group = grpS)
-showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) — gruen, gestrichelt",  group = grpS)
+grpS = "STRUKTUR-Karte (7-45 DTE) - stabile Tageslinien"
+showFlip = input.bool(true,  "FLIP - gelb, dick",                        group = grpS)
+showCW   = input.bool(true,  "CALL-WALL - rot, dick",                    group = grpS)
+showPW   = input.bool(true,  "PUT-WALL - gruen, dick",                   group = grpS)
+showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) - rot, gestrichelt",   group = grpS)
+showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) - gruen, gestrichelt",  group = grpS)
 
-grpN = "NAH-Karte (0-5 DTE) — 0DTE-Tageswetter/Pinning"
-showNCW  = input.bool(true,  "0DTE CALL-WALL — orange, gepunktet",       group = grpN)
-showNPW  = input.bool(true,  "0DTE PUT-WALL — tuerkis, gepunktet",       group = grpN)
-showNF   = input.bool(false, "0DTE FLIP — gelb, gepunktet",              group = grpN)
+grpN = "NAH-Karte (0-5 DTE) - 0DTE-Tageswetter/Pinning"
+showNCW  = input.bool(true,  "0DTE CALL-WALL - orange, gepunktet",       group = grpN)
+showNPW  = input.bool(true,  "0DTE PUT-WALL - tuerkis, gepunktet",       group = grpN)
+showNF   = input.bool(false, "0DTE FLIP - gelb, gepunktet",              group = grpN)
 
 grpX = "Sonstiges"
-showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag — blau, gepunktet", group = grpX)
-showMP   = input.bool(false, "MAX PAIN — grau, gepunktet",               group = grpX)
+showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag - blau, gepunktet", group = grpX)
+showMP   = input.bool(false, "MAX PAIN - grau, gepunktet",               group = grpX)
+
+grpV = "FLOW & VIX (Kontext, unvalidiert - kein Trade-Signal)"
+showVanna = input.bool(true,  "VANNA-Strike - violett, gepunktet",       group = grpV)
+showCharm = input.bool(true,  "CHARM-Strike - aqua, gepunktet",          group = grpV)
+showVix   = input.bool(true,  "VIX-Regime im Label (CBOE:VIX)",          group = grpV)
 
 t = str.upper(syminfo.ticker)
 detect() =>
@@ -117,6 +144,24 @@ nflip = off(pick(NQ_NF,   DOW_NF,   GOLD_NF,   DAX_NF,   FTSE_NF))
 mp    = off(pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP))
 spotL = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 em    = pick(NQ_EM,   DOW_EM,   GOLD_EM,   DAX_EM,   FTSE_EM)
+van   = pick(NQ_VAN,  DOW_VAN,  GOLD_VAN,  DAX_VAN,  FTSE_VAN)     // Mio USD, Vorzeichen = Dealer-Konvention
+vank  = off(pick(NQ_VANK, DOW_VANK, GOLD_VANK, DAX_VANK, FTSE_VANK))
+chm   = pick(NQ_CHM,  DOW_CHM,  GOLD_CHM,  DAX_CHM,  FTSE_CHM)
+chmk  = off(pick(NQ_CHMK, DOW_CHMK, GOLD_CHMK, DAX_CHMK, FTSE_CHMK))
+
+// ---- VIX-Regime (gestriger Daily-Close = bestaetigt, kein Repaint) ----
+// Tertile relativ zu den letzten 250 Handelstagen; Tilt nach validiertem Befund:
+// hoch/steigend -> Entscheidungstag (Trend ODER Whipsaw), niedrig/fallend -> Chop.
+[vix1, vix2, vp33, vp67] = request.security("CBOE:VIX", "D",
+     [close[1], close[2],
+      ta.percentile_linear_interpolation(close[1], 250, 33.333),
+      ta.percentile_linear_interpolation(close[1], 250, 66.667)],
+     ignore_invalid_symbol = true)
+vixReg  = na(vix1) or na(vp33) ? "n/a" : vix1 <= vp33 ? "NIEDRIG" : vix1 >= vp67 ? "HOCH" : "MITTEL"
+vixDir  = na(vix1) or na(vix2) ? "" : vix1 > vix2 + 0.05 ? "steigt" : vix1 < vix2 - 0.05 ? "faellt" : "flach"
+vixTilt = vixReg == "n/a" ? "" :
+     (vixReg == "HOCH" or vixDir == "steigt") ? "Entscheidungs-Tilt (Trend/Whipsaw, wenig Chop)" :
+     (vixReg == "NIEDRIG" and vixDir != "steigt") ? "Chop-Tilt" : "neutral"
 
 distPct = flip > 0 ? (close - flip) / flip * 100 : na
 reg = flip <= 0 ? -99 : math.abs(distPct) < neutralPct ? 0 : distPct > 0 ? 1 : -1
@@ -128,11 +173,13 @@ isStale = (timenow - levTime) > 1000 * 60 * 60 * 36
 var line  lF = na, var line lC = na, var line lP = na, var line lC2 = na, var line lP2 = na
 var line  lNC = na, var line lNP = na, var line lNF = na, var line lM = na
 var line  lE1 = na, var line lE2 = na
+var line  lVA = na, var line lCH = na
 var label lab = na
 if barstate.islast
     line.delete(lF), line.delete(lC), line.delete(lP), line.delete(lC2), line.delete(lP2)
     line.delete(lNC), line.delete(lNP), line.delete(lNF), line.delete(lM)
     line.delete(lE1), line.delete(lE2)
+    line.delete(lVA), line.delete(lCH)
     label.delete(lab)
     x1 = bar_index - 400
     if showFlip and flip > 0
@@ -156,8 +203,17 @@ if barstate.islast
     if showEM and em > 0 and spotL > 0
         lE1 := line.new(x1, spotL + em + offset, bar_index, spotL + em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
         lE2 := line.new(x1, spotL - em + offset, bar_index, spotL - em + offset, color = color.new(color.blue, 55), width = 1, extend = extend.right, style = line.style_dotted)
+    if showVanna and vank > 0
+        lVA := line.new(x1, vank, bar_index, vank, color = color.new(color.purple, 40), width = 1, extend = extend.right, style = line.style_dotted)
+    if showCharm and chmk > 0
+        lCH := line.new(x1, chmk, bar_index, chmk, color = color.new(color.aqua, 45), width = 1, extend = extend.right, style = line.style_dotted)
     regTxt = reg == 1 ? "LONG-GAMMA (Pin/Reversion)" : reg == -1 ? "SHORT-GAMMA (Trend/Amplify)" : reg == 0 ? "FLIP-ZONE (kein Signal)" : "keine Daten"
-    txt = sel + " — " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET — build_seed laufen lassen !!" : "")
+    flowTxt = (van != 0.0 or chm != 0.0) ?
+         "\nVanna " + (van > 0 ? "+" : "") + str.tostring(van, "#.#") + "M (Vol-runter=" + (van > 0 ? "KAUF" : "Verkauf") + ")" + (vank > 0 ? " @" + str.tostring(vank, format.mintick) : "") +
+         "  |  Charm " + (chm > 0 ? "+" : "") + str.tostring(chm, "#.#") + "M (" + (chm > 0 ? "Zeit=Kauf-Stuetze" : "Zeit=Verkauf-Druck") + ")" + (chmk > 0 ? " @" + str.tostring(chmk, format.mintick) : "") : ""
+    vixTxt = showVix and vixReg != "n/a" ?
+         "\nVIX " + str.tostring(vix1, "#.##") + " (" + vixReg + ", " + vixDir + ") -> " + vixTilt : ""
+    txt = sel + " - " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + flowTxt + vixTxt + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET - build_seed laufen lassen !!" : "")
     lab := label.new(bar_index, high, txt, style = label.style_label_left, color = isStale ? color.new(color.orange, 10) : reg == 1 ? color.new(color.green, 25) : reg == -1 ? color.new(color.red, 25) : color.new(color.gray, 25), textcolor = color.white, size = size.small)
 
 // ===== ALERTS (im Alert-Dialog auswaehlbar) =====
