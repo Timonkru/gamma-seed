@@ -263,6 +263,17 @@ def main():
     for prefix, ccy, thunk in CONFIG:
         try:
             ch = thunk()
+            # SANITY-GATE 2026-07-13: Montag-vor-US-Open lieferte Yahoo kollabierte
+            # IVs (Median 0.031, 44% der Kette IV<=0.01) -> Flip/CW/PW klebten am
+            # ATM, EM1d ±1 Punkt, und der Muell wurde eingefroren. Degenerierte
+            # Kette => Markt skippen, gespeicherte Level bleiben stehen.
+            if "iv" in ch.df.columns and "dte" in ch.df.columns:
+                _s = ch.df[ch.df["dte"] >= STRUCT_MIN_DTE]
+                _med_iv = float(_s["iv"].median()) if len(_s) else 0.0
+                if _med_iv < 0.05:
+                    print(f"[DEGENERIERT] {prefix}: Median-IV {_med_iv:.3f} < 0.05 "
+                          f"(Kette stale — Wochenende/vor US-Open?). Geskippt, alte Level bleiben.")
+                    continue
         except Exception as e:
             print(f"[skip] {prefix}: {e}")
             continue
@@ -340,17 +351,21 @@ def main():
     print("\n" + block)
     (ROOT / "today_levels.txt").write_text(block + "\n", encoding="utf-8")
 
-    levels = {p: {"flip": g(s, "gamma_flip"), "cw": g(s, "call_wall"),
-                  "pw": g(s, "put_wall"), "cw2": g(s, "call_wall2"),
-                  "pw2": g(s, "put_wall2"), "ncw": g(n, "call_wall"),
-                  "npw": g(n, "put_wall"), "nflip": g(n, "gamma_flip"),
-                  "mp": g(s, "max_pain"),
-                  "spot": s["spot"], "em": g(s, "exp_move_1d"),
-                  "van": (s.get("total_vanna") or 0.0) / 1e6,
-                  "vank": g(s, "vanna_strike"),
-                  "chm": (s.get("total_charm") or 0.0) / 1e6,
-                  "chmk": g(s, "charm_strike")}
-              for p, s, n in copyrows}
+    # SANITY-GATE 2026-07-13: mit gespeicherten Leveln starten und nur frische
+    # Maerkte ueberschreiben — geskippte (degenerierte) behalten so ihre alten
+    # Linien im Pine, statt komplett zu verschwinden.
+    levels = load_stored_levels()
+    for p, s, n in copyrows:
+        levels[p] = {"flip": g(s, "gamma_flip"), "cw": g(s, "call_wall"),
+                     "pw": g(s, "put_wall"), "cw2": g(s, "call_wall2"),
+                     "pw2": g(s, "put_wall2"), "ncw": g(n, "call_wall"),
+                     "npw": g(n, "put_wall"), "nflip": g(n, "gamma_flip"),
+                     "mp": g(s, "max_pain"),
+                     "spot": s["spot"], "em": g(s, "exp_move_1d"),
+                     "van": (s.get("total_vanna") or 0.0) / 1e6,
+                     "vank": g(s, "vanna_strike"),
+                     "chm": (s.get("total_charm") or 0.0) / 1e6,
+                     "chmk": g(s, "charm_strike")}
     auto = gen_auto_pine(levels, today)
     print(f"\nAUTO-Indikator v2 regeneriert -> {auto}")
     print("   => Datei komplett in den TradingView-Pine-Editor kopieren (1x taeglich, vor US-Open).")
