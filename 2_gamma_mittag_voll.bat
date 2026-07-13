@@ -4,6 +4,11 @@ rem  GAMMA VOLLER LAUF  --  ~14:00 Berlin (nach US-OI-Update
 rem  ~12:30, VOR US-Open 15:30). Rechnet ALLES neu:
 rem  NQ / DOW / GOLD (yfinance) + DAX (Eurex-API).
 rem  Danach liegt der Pine-Code in der ZWISCHENABLAGE.
+rem
+rem  MONTAGS + NACH US-FEIERTAGEN: erst ab ~15:45 laufen lassen!
+rem  Yahoo-IVs zerfallen nach 2+ Tagen Pause (Median-IV ~0.03) ->
+rem  das Sanity-Gate skippt die US-Maerkte dann mit [DEGENERIERT]
+rem  und behaelt die alten Level (Vorfall + Fix: 2026-07-13).
 rem ============================================================
 cd /d "%~dp0"
 echo === Gamma voller Lauf (US frisch + DAX) ===
