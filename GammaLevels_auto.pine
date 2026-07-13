@@ -6,7 +6,7 @@
 // Taeglich VOR US-Open: `python build_seed.py` -> Datei komplett in den Pine-Editor -> Save.
 indicator("Gamma Levels v3 (Auto) [KruegerAlgorithms]", overlay = true)
 
-// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert 2026-07-12) =====
+// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert 2026-07-13) =====
 NQ_FLIP = 30005.58
 NQ_CW = 30256.34
 NQ_PW = 28776.41
@@ -57,9 +57,9 @@ DAX_CW = 26000.00
 DAX_PW = 24500.00
 DAX_CW2 = 25400.00
 DAX_PW2 = 24900.00
-DAX_NCW = 0.00
-DAX_NPW = 0.00
-DAX_NF = 0.00
+DAX_NCW = 24900.00
+DAX_NPW = 24500.00
+DAX_NF = 25020.10
 DAX_MP = 25000.00
 DAX_SPOT = 25118.27
 DAX_EM = 236.87
@@ -82,10 +82,10 @@ FTSE_VAN = 0.00
 FTSE_VANK = 0.00
 FTSE_CHM = 0.00
 FTSE_CHMK = 0.00
-LEV_DATE = "2026-07-12"
+LEV_DATE = "2026-07-13 EU-Morgenlauf (US=Vortag)"
 LEV_Y = 2026
 LEV_M = 7
-LEV_D = 12
+LEV_D = 13
 // ==================================================================
 
 idx        = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])

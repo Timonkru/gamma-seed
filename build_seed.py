@@ -430,12 +430,18 @@ def eu_morning_update():
     if struct is None:
         print("[FEHLER] DAX: keine Struktur-Kette")
         return
+    # FIX 2026-07-13: Vanna/Charm-Metriken (12.07. in METRICS ergaenzt) fehlten im
+    # EU-Pfad -> KeyError 'VANNA'. vals + levels spiegeln jetzt exakt main() (Z. 302ff).
     vals = {"FLIP": g(struct, "gamma_flip"), "CWALL": g(struct, "call_wall"),
             "PWALL": g(struct, "put_wall"), "CWALL2": g(struct, "call_wall2"),
             "PWALL2": g(struct, "put_wall2"), "NCWALL": g(near, "call_wall"),
             "NPWALL": g(near, "put_wall"), "NFLIP": g(near, "gamma_flip"),
             "MAXPAIN": g(struct, "max_pain"), "EM1D": g(struct, "exp_move_1d"),
-            "GEXBN": struct["total_gex"] / 1e9, "SPOT": struct["spot"]}
+            "GEXBN": struct["total_gex"] / 1e9, "SPOT": struct["spot"],
+            "VANNA": (struct.get("total_vanna") or 0.0) / 1e6,
+            "VANNAK": g(struct, "vanna_strike"),
+            "CHARM": (struct.get("total_charm") or 0.0) / 1e6,
+            "CHARMK": g(struct, "charm_strike")}
     for m in METRICS:
         append_row(f"DAX_{m}", today, vals[m])
     levels["DAX"] = {"flip": g(struct, "gamma_flip"), "cw": g(struct, "call_wall"),
@@ -443,7 +449,11 @@ def eu_morning_update():
                      "pw2": g(struct, "put_wall2"), "ncw": g(near, "call_wall"),
                      "npw": g(near, "put_wall"), "nflip": g(near, "gamma_flip"),
                      "mp": g(struct, "max_pain"), "spot": struct["spot"],
-                     "em": g(struct, "exp_move_1d")}
+                     "em": g(struct, "exp_move_1d"),
+                     "van": (struct.get("total_vanna") or 0.0) / 1e6,
+                     "vank": g(struct, "vanna_strike"),
+                     "chm": (struct.get("total_charm") or 0.0) / 1e6,
+                     "chmk": g(struct, "charm_strike")}
     print(f"DAX   spot {struct['spot']:.0f} | {struct['regime'].upper():7s} "
           f"| Flip {g(struct,'gamma_flip'):.0f} ({struct['dist_to_flip_pct'] or 0:+.2f}%) "
           f"| CW {g(struct,'call_wall'):.0f}/{g(struct,'call_wall2'):.0f} "
