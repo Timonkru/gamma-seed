@@ -61,6 +61,8 @@ def yf_us(symbol="QQQ", currency="USD", max_days=45, min_days=0, mult=100.0):
     spot = float(_h.iloc[-1])
     today = datetime.now(timezone.utc).date()
     rows = []
+    n_inverted = 0   # IV-Fallback-Zaehler (s.u.)
+    n_dropped = 0
     for exp in tk.options:
         ed = datetime.strptime(exp, "%Y-%m-%d").date()
         dte = (ed - today).days
@@ -69,16 +71,54 @@ def yf_us(symbol="QQQ", currency="USD", max_days=45, min_days=0, mult=100.0):
         T = max(np.busday_count(today, ed), 0.5) / 252.0
         oc = tk.option_chain(exp)
         for d, typ in [(oc.calls, "C"), (oc.puts, "P")]:
-            s = d[["strike", "openInterest", "impliedVolatility", "volume"]].copy()
+            s = d[["strike", "openInterest", "impliedVolatility", "volume",
+                   "bid", "ask", "lastPrice", "lastTradeDate"]].copy()
             s["volume"] = s["volume"].fillna(0.0)
-            s = s.dropna(subset=["strike", "openInterest", "impliedVolatility"])
+            s = s.dropna(subset=["strike", "openInterest"])
             # Volumen > 0 reicht: intraday geoeffnete 0DTE-Positionen haben OI=0!
-            s = s[((s["openInterest"] > 0) | (s["volume"] > 0))
-                  & (s["impliedVolatility"] > 0)]
+            s = s[(s["openInterest"] > 0) | (s["volume"] > 0)]
             for _, r in s.iterrows():
+                iv = float(r["impliedVolatility"]) if pd.notna(r["impliedVolatility"]) else 0.0
+                # IV-FALLBACK (2026-07-15): Yahoos impliedVolatility-Feld fiel am
+                # 09.07. und 15.07.2026 flaechig aus (Werte ~0.001-0.03 = Unsinn,
+                # EM-Zeile ±1.64 statt ±300 bzw. Degeneriert-Skip), die PREISE
+                # der Kette blieben intakt. Bei iv < 0.03 wird die IV daher aus
+                # der Bid/Ask-Mitte selbst invertiert (gex.implied_vol) —
+                # identische Methodik wie der Eurex-DAX-Pfad (Settlement-Inversion).
+                if iv < 0.03:
+                    bid = float(r["bid"]) if pd.notna(r["bid"]) else 0.0
+                    ask = float(r["ask"]) if pd.notna(r["ask"]) else 0.0
+                    px = None
+                    if bid > 0 and ask >= bid:
+                        px = (bid + ask) / 2.0
+                    else:
+                        # Quote-Totalausfall (bid/ask=0.0, erlebt 15.07.2026):
+                        # lastPrice = letzter Handelspreis, typisch Vortags-
+                        # schluss (lastTradeDate pruefen, max 5 Tage alt) —
+                        # gleiche Semantik wie Eurex-Settlement, und vor Open
+                        # ohnehin der Soll-Zustand der eingefrorenen Karte.
+                        lp = r["lastPrice"] if "lastPrice" in r else None
+                        ltd = r["lastTradeDate"] if "lastTradeDate" in r else None
+                        if pd.notna(lp) and float(lp) > 0 and pd.notna(ltd):
+                            age_d = (pd.Timestamp.now(tz="UTC") -
+                                     pd.Timestamp(ltd)).total_seconds() / 86400.0
+                            if age_d <= 5.0:
+                                px = float(lp)
+                    if px is not None:
+                        import gex
+                        iv_inv = gex.implied_vol(px, spot,
+                                                 float(r["strike"]), T, typ)
+                        if iv_inv is not None and iv_inv >= 0.03:
+                            iv = float(iv_inv)
+                            n_inverted += 1
+                    if iv < 0.03:
+                        n_dropped += 1
+                        continue   # weder brauchbare IV noch invertierbarer Preis
                 rows.append((float(r["strike"]), typ, float(r["openInterest"]),
-                             float(r["impliedVolatility"]), T, mult, dte,
-                             float(r["volume"])))
+                             iv, T, mult, dte, float(r["volume"])))
+    if n_inverted or n_dropped:
+        print(f"[iv-fallback] {symbol}: {n_inverted} Reihen aus Optionspreis invertiert "
+              f"(Bid/Ask-Mid, sonst lastPrice), {n_dropped} verworfen (kein Preis-Bracket)")
     if not rows:
         raise RuntimeError(f"yf_us({symbol}): keine Optionsdaten erhalten (Netz/Markt zu?).")
     df = pd.DataFrame(rows, columns=["strike", "type", "oi", "iv", "T", "mult",
