@@ -51,6 +51,35 @@ SCALE_KEYS = ("gamma_flip", "call_wall", "call_wall2", "put_wall", "put_wall2",
               "max_pain", "exp_move_1d", "vanna_strike", "charm_strike")
 
 
+def tv_seed_block(win, spot, day, scale=1.0):
+    """Paste-Block fuer das oeffentliche TV-Skript "Gamma Exposure Profile —
+    Manual Chain Input": Header + eine Zeile je Strike (strike;callOI;putOI;iv).
+    win = Ketten-Slice (Struktur ODER Nah), spot in INDEX-Punkten, scale = R
+    (ETF->Index; skaliert nur die Strikes — Level haengen nur an Preisachsen-
+    konsistenz, nicht an der GEX-Magnitude). Eine repraesentative DTE je Karte
+    (OI-gewichtet) — bewusste Kompression fuer manuelle Eingabe."""
+    if win is None or not len(win):
+        return None
+    tot_oi = float(win["oi"].sum())
+    if tot_oi <= 0:
+        return None
+    dte = float((win["dte"] * win["oi"]).sum() / tot_oi)
+    mult = float(win["mult"].iloc[0])
+    rows = []
+    for k, g in win.groupby("strike"):
+        c = float(g.loc[g["type"] == "C", "oi"].sum())
+        p = float(g.loc[g["type"] == "P", "oi"].sum())
+        s_oi = float(g["oi"].sum())
+        if c + p <= 0:
+            continue
+        iv = float((g["iv"] * g["oi"]).sum() / s_oi) if s_oi > 0 else float(g["iv"].mean())
+        rows.append(f"{k * scale:.2f};{c:.0f};{p:.0f};{iv:.4f}")
+    if not rows:
+        return None
+    hdr = f"#spot={spot:.2f};dte={dte:.1f};mult={mult:g};date={day}"
+    return hdr + "\n" + "\n".join(rows)
+
+
 def append_row(ticker, d, value):
     f = DATA / f"{ticker}.csv"
     stamp = d.strftime("%Y%m%d") + "T"
@@ -303,6 +332,21 @@ def main():
                 print(f"[warn] {prefix}: Index-Spot {isym} fehlgeschlagen ({e})")
 
         copyrows.append((prefix, struct, near))
+
+        # TV-Seed fuers oeffentliche Manual-Input-Skript (Strikes in Index-Punkten)
+        try:
+            R = float(struct.get("R") or 1.0)
+            tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
+            sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R)
+            nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R)
+            if sb:
+                out = "=== STRUCTURE (7-45 DTE) — Feld 1 ===\n" + sb
+                if nb:
+                    out += "\n\n=== NEAR (0-5 DTE) — Feld 2 ===\n" + nb
+                (tvdir / f"{prefix}.txt").write_text(out + "\n", encoding="utf-8")
+        except Exception as e:
+            print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
+
         print(f"{prefix:5s} spot {struct['spot']:.0f} | {struct['regime'].upper():7s} "
               f"| Flip {g(struct,'gamma_flip'):.0f} ({struct['dist_to_flip_pct'] or 0:+.2f}%) "
               f"| CW {g(struct,'call_wall'):.0f}/{g(struct,'call_wall2'):.0f} "
