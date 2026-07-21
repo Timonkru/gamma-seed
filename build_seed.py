@@ -51,6 +51,14 @@ SCALE_KEYS = ("gamma_flip", "call_wall", "call_wall2", "put_wall", "put_wall2",
               "max_pain", "exp_move_1d", "vanna_strike", "charm_strike")
 
 
+def _fmt_row(t, scale):
+    """Kompakt: Strike ohne .00 wenn ganzzahlig; iv 4 / dte 1 Dezimale —
+    Rundungs-Paritaet gemessen exakt (Flip/Vanna/Charm unveraendert)."""
+    k = t[1] * scale
+    ks = f"{k:.2f}".rstrip("0").rstrip(".")
+    return f"{ks};{t[2]:.0f};{t[3]:.0f};{t[4]:.4f};{t[5]:.1f}"
+
+
 def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
     """Paste-Block fuer das oeffentliche TV-Skript "Gamma Exposure Profile —
     Manual Chain Input": Header + eine Zeile je Strike
@@ -102,13 +110,19 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
         for t in weighted:
             t[0] += t[gi] / m
     weighted.sort(key=lambda t: -t[0])
-    tot_w = sum(t[0] for t in weighted)
-    keep, acc = [], 0.0
+    # HARTES ZEICHEN-BUDGET statt Gewichts-Quantil (21.07., gemessen):
+    # TVs input.text_area kappt still bei 10.905 Zeichen — ein 14K-Block
+    # verlor die hohen Strikes, ohne es anzuzeigen. Budget 10.500 laesst
+    # Marge fuer Header/Marker. Kompakt-Format (Strike ohne .00, iv 4 / dte
+    # 1 Dezimale) ist paritaets-verifiziert: Flip/Vanna/Charm exakt.
+    BUDGET = 10500
+    keep, used = [], 90   # Header-Reserve
     for t in weighted:
-        keep.append(t)
-        acc += t[0]
-        if acc >= tot_w * 0.995:
+        ln = len(_fmt_row(t, scale)) + 1
+        if used + ln > BUDGET:
             break
+        keep.append(t)
+        used += ln
     # ATM-Pflicht: die 6 spot-naechsten Zeilen IMMER mitnehmen — das Pine
     # schaetzt die ATM-IV (Expected Move) als Median dieser Zeilen, exakt wie
     # die private Referenz; der Trim darf sie nicht wegwerfen.
@@ -117,10 +131,7 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
         if id(t) not in kept:
             keep.append(t)
     keep.sort(key=lambda t: (t[1], t[5]))          # nach Strike, dann DTE
-    # iv 6 / dte 3 Dezimalen: 1-Dezimal-dte kostete messbar Vanna/Charm
-    # (d2-sensitiv): -3.6M/-3.8M auf der DAX-Kette.
-    rows = [f"{t[1] * scale:.2f};{t[2]:.0f};{t[3]:.0f};{t[4]:.6f};{t[5]:.3f}"
-            for t in keep]
+    rows = [_fmt_row(t, scale) for t in keep]
     # aiv-Parameter = atm_iv aus DEMSELBEN compute_levels-Lauf wie das Label
     # (eine Quelle!). Eigene Neuberechnung nur als Fallback: am ATM liegen
     # viele Zeilen mit identischer Distanz — welche 6 der Median sieht, haengt
