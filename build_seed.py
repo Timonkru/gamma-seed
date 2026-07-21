@@ -59,7 +59,7 @@ def _fmt_row(t, scale):
     return f"{ks};{t[2]:.0f};{t[3]:.0f};{t[4]:.4f};{t[5]:.1f}"
 
 
-def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
+def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
     """Paste-Block fuer das oeffentliche TV-Skript "Gamma Exposure Profile —
     Manual Chain Input": Header + eine Zeile je Strike
     (strike;callOI;putOI;iv;dte).
@@ -139,7 +139,12 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
     if aiv is None:
         atm = win.loc[(win["strike"] - S).abs().sort_values().index[:6], "iv"]
         aiv = float(atm.median()) if len(atm) else None
-    hdr = f"#spot={spot:.2f};dte={dte:.1f};mult={mult:g};date={day}"
+    hdr = "#"
+    if market:
+        hdr += f"market={market};"          # v1.3: Auto-Detect-Schluessel
+    if gmap:
+        hdr += f"map={gmap};"               # v1.3: near-Karte im selben Feld
+    hdr += f"spot={spot:.2f};dte={dte:.1f};mult={mult:g};date={day}"
     if aiv:
         # ATM-IV der vollen Kette (auch OI=0-Zeilen tragen IV-Info) — das
         # Seed-Format transportiert nur OI>0; ohne aiv weicht der EM ~10% ab.
@@ -156,16 +161,64 @@ def write_tv_seed(prefix, df, struct, near, today):
         R = float(struct.get("R") or 1.0)
         tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
         sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R,
-                           aiv=struct.get("atm_iv"))
+                           aiv=struct.get("atm_iv"), market=prefix)
         nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R,
-                           aiv=(near or {}).get("atm_iv"))
+                           aiv=(near or {}).get("atm_iv"), market=prefix, gmap="near")
         if sb:
-            out = "=== STRUCTURE (7-45 DTE) — Feld 1 ===\n" + sb
-            if nb:
-                out += "\n\n=== NEAR (0-5 DTE) — Feld 2 ===\n" + nb
+            # v1.3: pure Paste-Bloecke (market=/map= im Header ersetzen die
+            # alten ===-Marker; Datei kann 1:1 in ein Feld kopiert werden)
+            out = sb + ("\n\n" + nb if nb else "")
             (tvdir / f"{prefix}.txt").write_text(out + "\n", encoding="utf-8")
+            pack_paste_fields(tvdir)
     except Exception as e:
         print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
+
+
+def pack_paste_fields(tvdir):
+    """v1.3: verteilt die Bloecke ALLER vorhandenen Markt-Dateien auf
+    PASTE_1..n.txt, jede Datei <= ein text_area-Feld (TV kappt still bei
+    10.905 Zeichen - live gemessen 21.07.). Der --eu-Lauf aktualisiert nur
+    DAX; die US-Bloecke stammen dann aus den bestehenden Dateien des letzten
+    vollen Laufs (konsistent zum Label "US = previous day")."""
+    FIELD_BUDGET = 10700
+    blocks = []
+    for m in ("DAX", "NQ", "DOW", "GOLD", "FTSE"):
+        p = tvdir / f"{m}.txt"
+        if not p.exists():
+            continue
+        txt = p.read_text(encoding="utf-8")
+        if "market=" not in txt.split(chr(10))[0] and "market=" not in txt:
+            print(f"[warn] pack_paste_fields: {m}.txt ohne market=-Key (Altformat) -> uebersprungen, naechster voller Lauf erneuert sie")
+            continue
+        cur = []
+        for ln in txt.splitlines():
+            if ln.startswith("#") and cur:
+                blocks.append("\n".join(cur))
+                cur = []
+            if ln.strip() and not ln.startswith("==="):
+                cur.append(ln)
+        if cur:
+            blocks.append("\n".join(cur))
+    if not blocks:
+        return
+    fields = []
+    for b in blocks:
+        placed = False
+        for i, fx in enumerate(fields):
+            if len(fx) + len(b) + 2 <= FIELD_BUDGET:
+                fields[i] = fx + "\n\n" + b
+                placed = True
+                break
+        if not placed:
+            if len(b) > FIELD_BUDGET:
+                print(f"[warn] pack_paste_fields: Block > Feld-Budget ({len(b)})")
+            fields.append(b)
+    for old in tvdir.glob("PASTE_*.txt"):
+        old.unlink()
+    for i, fx in enumerate(fields, 1):
+        (tvdir / f"PASTE_{i}.txt").write_text(fx + "\n", encoding="utf-8")
+    print(f"[tv_seed] {len(blocks)} Bloecke -> {len(fields)} Paste-Felder "
+          f"(max {max(len(f) for f in fields)} Zeichen)")
 
 
 def append_row(ticker, d, value):
