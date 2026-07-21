@@ -115,7 +115,7 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
     # verlor die hohen Strikes, ohne es anzuzeigen. Budget 10.500 laesst
     # Marge fuer Header/Marker. Kompakt-Format (Strike ohne .00, iv 4 / dte
     # 1 Dezimale) ist paritaets-verifiziert: Flip/Vanna/Charm exakt.
-    BUDGET = 10500
+    BUDGET = 10100
     keep, used = [], 90   # Header-Reserve
     for t in weighted:
         ln = len(_fmt_row(t, scale)) + 1
@@ -180,7 +180,7 @@ def pack_paste_fields(tvdir):
     10.905 Zeichen - live gemessen 21.07.). Der --eu-Lauf aktualisiert nur
     DAX; die US-Bloecke stammen dann aus den bestehenden Dateien des letzten
     vollen Laufs (konsistent zum Label "US = previous day")."""
-    FIELD_BUDGET = 10700
+    FIELD_BUDGET = 10300
     blocks = []
     for m in ("DAX", "NQ", "DOW", "GOLD", "FTSE"):
         p = tvdir / f"{m}.txt"
@@ -217,8 +217,14 @@ def pack_paste_fields(tvdir):
         old.unlink()
     for i, fx in enumerate(fields, 1):
         (tvdir / f"PASTE_{i}.txt").write_text(fx + "\n", encoding="utf-8")
-    print(f"[tv_seed] {len(blocks)} Bloecke -> {len(fields)} Paste-Felder "
-          f"(max {max(len(f) for f in fields)} Zeichen)")
+    mx = max(len(f) for f in fields)
+    print(f"[tv_seed] {len(blocks)} Bloecke -> {len(fields)} Paste-Felder (max {mx} Zeichen)")
+    # TV kappt input.text_area still bei 10.905 Zeichen (live gemessen 21.07.)
+    if mx > 10800:
+        print(f"[FEHLER] Paste-Feld {mx} Zeichen > TV-Limit 10.905 - Budget senken!")
+    if len(fields) > 10:
+        print(f"[WARNUNG] {len(fields)} Felder, das Skript hat nur 10 - "
+              f"PASTE_11+ wird NICHT gelesen. Maerkte reduzieren.")
 
 
 def append_row(ticker, d, value):
