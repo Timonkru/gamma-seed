@@ -136,6 +136,27 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
     return hdr + "\n" + "\n".join(rows)
 
 
+def write_tv_seed(prefix, df, struct, near, today):
+    """Seed-Datei fuers oeffentliche GEX Profile. Als FUNKTION an beiden
+    Pfaden (voller Lauf UND --eu) - vorher schrieb nur der volle Lauf;
+    der --eu-Morgenlauf liess die Seeds auf Vortags-Stand (Befund 21.07.:
+    DAX.txt trug noch date=2026-07-20 im Alt-Format)."""
+    try:
+        R = float(struct.get("R") or 1.0)
+        tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
+        sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R,
+                           aiv=struct.get("atm_iv"))
+        nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R,
+                           aiv=(near or {}).get("atm_iv"))
+        if sb:
+            out = "=== STRUCTURE (7-45 DTE) — Feld 1 ===\n" + sb
+            if nb:
+                out += "\n\n=== NEAR (0-5 DTE) — Feld 2 ===\n" + nb
+            (tvdir / f"{prefix}.txt").write_text(out + "\n", encoding="utf-8")
+    except Exception as e:
+        print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
+
+
 def append_row(ticker, d, value):
     f = DATA / f"{ticker}.csv"
     stamp = d.strftime("%Y%m%d") + "T"
@@ -389,21 +410,7 @@ def main():
 
         copyrows.append((prefix, struct, near))
 
-        # TV-Seed fuers oeffentliche Manual-Input-Skript (Strikes in Index-Punkten)
-        try:
-            R = float(struct.get("R") or 1.0)
-            tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
-            sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R,
-                               aiv=struct.get("atm_iv"))
-            nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R,
-                               aiv=(near or {}).get("atm_iv"))
-            if sb:
-                out = "=== STRUCTURE (7-45 DTE) — Feld 1 ===\n" + sb
-                if nb:
-                    out += "\n\n=== NEAR (0-5 DTE) — Feld 2 ===\n" + nb
-                (tvdir / f"{prefix}.txt").write_text(out + "\n", encoding="utf-8")
-        except Exception as e:
-            print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
+        write_tv_seed(prefix, df, struct, near, today)
 
         print(f"{prefix:5s} spot {struct['spot']:.0f} | {struct['regime'].upper():7s} "
               f"| Flip {g(struct,'gamma_flip'):.0f} ({struct['dist_to_flip_pct'] or 0:+.2f}%) "
@@ -547,6 +554,7 @@ def eu_morning_update():
     if struct is None:
         print("[FEHLER] DAX: keine Struktur-Kette")
         return
+    write_tv_seed("DAX", df, struct, near, today)
     # FIX 2026-07-13: Vanna/Charm-Metriken (12.07. in METRICS ergaenzt) fehlten im
     # EU-Pfad -> KeyError 'VANNA'. vals + levels spiegeln jetzt exakt main() (Z. 302ff).
     vals = {"FLIP": g(struct, "gamma_flip"), "CWALL": g(struct, "call_wall"),
