@@ -217,9 +217,9 @@ def write_tv_seed(prefix, df, struct, near, today):
         rows_s = sb.count("\n")
         print(f"[tv_seed] {prefix}: Struktur {rows_s} Zeilen -> {len(sparts)} Feld(er), "
               f"Nah -> {len(nparts)} Feld(er)")
-        if len(sparts) > 2:
-            print(f"[WARNUNG] {prefix}: {len(sparts)} Struktur-Teile, das Skript "
-                  f"hat 2 Felder - Teil 3+ geht verloren.")
+        if len(sparts) > 2 or len(nparts) > 2:
+            print(f"[WARNUNG] {prefix}: Struktur {len(sparts)} / Nah {len(nparts)} Teile, "
+                  f"das Skript hat je 2 Felder - Teil 3+ geht verloren.")
     except Exception as e:
         print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
 
