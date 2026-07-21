@@ -51,13 +51,22 @@ SCALE_KEYS = ("gamma_flip", "call_wall", "call_wall2", "put_wall", "put_wall2",
               "max_pain", "exp_move_1d", "vanna_strike", "charm_strike")
 
 
-def tv_seed_block(win, spot, day, scale=1.0):
+def tv_seed_block(win, spot, day, scale=1.0, aiv=None):
     """Paste-Block fuer das oeffentliche TV-Skript "Gamma Exposure Profile —
-    Manual Chain Input": Header + eine Zeile je Strike (strike;callOI;putOI;iv).
-    win = Ketten-Slice (Struktur ODER Nah), spot in INDEX-Punkten, scale = R
-    (ETF->Index; skaliert nur die Strikes — Level haengen nur an Preisachsen-
-    konsistenz, nicht an der GEX-Magnitude). Eine repraesentative DTE je Karte
-    (OI-gewichtet) — bewusste Kompression fuer manuelle Eingabe."""
+    Manual Chain Input": Header + eine Zeile je Strike
+    (strike;callOI;putOI;iv;dte).
+    win = Ketten-Slice (Struktur ODER Nah), spot in INDEX-PunkTEN, scale = R
+    (ETF->Index; skaliert nur die Strikes).
+    FIX-HISTORIE 2026-07-20 (Timons Befunde, 2 Runden):
+    (1) EINE Mittel-DTE fuer die ganze Karte verschob den DOW-Flip um 368
+        Punkte (Gamma ~1/sqrt(T)) und kippte das Regime -> Feld 5 = DTE.
+    (2) Auch die Buendelung JE STRIKE blieb -50 Punkte daneben — Haupttreiber
+        war die OI-gemischte Call/Put-IV am selben Strike. Jetzt: EINE ZEILE
+        PRO OPTION (Calls: k;oi;0;iv;dte / Puts: k;0;oi;iv;dte) — gemessen
+        exakt (Diff -0.1 Pkt zur vollen privaten Rechnung). Zeilen werden nach
+        |GEX|-Beitrag am Spot sortiert und auf 99.5 %% kumuliertes Gewicht
+        getrimmt (DAX: 649 -> 411 Zeilen; haelt den Paste kompakt und
+        entfernt Deep-OTM-Rauschen). Header-DTE bleibt Fallback."""
     if win is None or not len(win):
         return None
     tot_oi = float(win["oi"].sum())
@@ -65,18 +74,65 @@ def tv_seed_block(win, spot, day, scale=1.0):
         return None
     dte = float((win["dte"] * win["oi"]).sum() / tot_oi)
     mult = float(win["mult"].iloc[0])
-    rows = []
-    for k, g in win.groupby("strike"):
-        c = float(g.loc[g["type"] == "C", "oi"].sum())
-        p = float(g.loc[g["type"] == "P", "oi"].sum())
-        s_oi = float(g["oi"].sum())
-        if c + p <= 0:
+    S = spot / scale if scale else spot
+    weighted = []
+    for _, r in win.iterrows():
+        oi = float(r["oi"])
+        if oi <= 0:
             continue
-        iv = float((g["iv"] * g["oi"]).sum() / s_oi) if s_oi > 0 else float(g["iv"].mean())
-        rows.append(f"{k * scale:.2f};{c:.0f};{p:.0f};{iv:.4f}")
-    if not rows:
+        # Trim-Gewicht ueber ALLE drei Groessen (GEX, Vanna, Charm) — reines
+        # GEX-Gewicht warf Zeilen weg, die kaum Gamma, aber relevantes
+        # Vanna/Charm tragen (gemessen: -4 % Vanna beim reinen GEX-Trim).
+        wg = abs(float(gex.bs_gamma(S, r["strike"], r["T"], r["iv"])) * oi)
+        wv = abs(float(gex.bs_vanna(S, r["strike"], r["T"], r["iv"])) * oi)
+        wc = abs(float(gex.bs_charm(S, r["strike"], r["T"], r["iv"])) * oi)
+        c = oi if r["type"] == "C" else 0.0
+        p = oi if r["type"] == "P" else 0.0
+        # Feld 5 = T*365, NICHT die Kalender-dte: die Ketten-T-Spalte ist
+        # Busdays/252 (KasseRL-Konvention); das Pine rechnet Feld5/365. Nur
+        # T*365 reproduziert das private T exakt (dte waere ~8%% daneben —
+        # gemessen als -3.7M Vanna / -3.7M Charm).
+        weighted.append([0.0, float(r["strike"]), c, p,
+                         float(r["iv"]), float(r["T"]) * 365.0, wg, wv, wc,
+                         abs(float(r["strike"]) - S)])
+    if not weighted:
         return None
+    for gi in (6, 7, 8):                            # normiert je Groesse
+        m = max(t[gi] for t in weighted) or 1.0
+        for t in weighted:
+            t[0] += t[gi] / m
+    weighted.sort(key=lambda t: -t[0])
+    tot_w = sum(t[0] for t in weighted)
+    keep, acc = [], 0.0
+    for t in weighted:
+        keep.append(t)
+        acc += t[0]
+        if acc >= tot_w * 0.995:
+            break
+    # ATM-Pflicht: die 6 spot-naechsten Zeilen IMMER mitnehmen — das Pine
+    # schaetzt die ATM-IV (Expected Move) als Median dieser Zeilen, exakt wie
+    # die private Referenz; der Trim darf sie nicht wegwerfen.
+    kept = {id(t) for t in keep}
+    for t in sorted(weighted, key=lambda t: t[9])[:6]:
+        if id(t) not in kept:
+            keep.append(t)
+    keep.sort(key=lambda t: (t[1], t[5]))          # nach Strike, dann DTE
+    # iv 6 / dte 3 Dezimalen: 1-Dezimal-dte kostete messbar Vanna/Charm
+    # (d2-sensitiv): -3.6M/-3.8M auf der DAX-Kette.
+    rows = [f"{t[1] * scale:.2f};{t[2]:.0f};{t[3]:.0f};{t[4]:.6f};{t[5]:.3f}"
+            for t in keep]
+    # aiv-Parameter = atm_iv aus DEMSELBEN compute_levels-Lauf wie das Label
+    # (eine Quelle!). Eigene Neuberechnung nur als Fallback: am ATM liegen
+    # viele Zeilen mit identischer Distanz — welche 6 der Median sieht, haengt
+    # sonst an der Sortier-Reihenfolge (nicht wohldefiniert bei Ties).
+    if aiv is None:
+        atm = win.loc[(win["strike"] - S).abs().sort_values().index[:6], "iv"]
+        aiv = float(atm.median()) if len(atm) else None
     hdr = f"#spot={spot:.2f};dte={dte:.1f};mult={mult:g};date={day}"
+    if aiv:
+        # ATM-IV der vollen Kette (auch OI=0-Zeilen tragen IV-Info) — das
+        # Seed-Format transportiert nur OI>0; ohne aiv weicht der EM ~10% ab.
+        hdr += f";aiv={aiv:.4f}"
     return hdr + "\n" + "\n".join(rows)
 
 
@@ -108,42 +164,42 @@ def write_symbol_info(tickers, meta):
 
 
 AUTO_TEMPLATE = r'''//@version=6
-// Gamma Levels v3 (Auto) [KruegerAlgorithms] - AUTO-GENERIERT von build_seed.py (NICHT editieren)
-// STRUKTUR-Karte (7-45 DTE) = dicke Linien | NAH-Karte (0-5 DTE) = gepunktet = Tageswetter/Pinning
-// v3: Vanna/Charm-Strikes + VIX-Regime im Label (Kontext, unvalidiert - kein Signal).
-// Template ist bewusst reines ASCII (die .bat-Rituale kopieren via `clip` = ANSI).
-// Taeglich VOR US-Open: `python build_seed.py` -> Datei komplett in den Pine-Editor -> Save.
+// Gamma Levels v3 (Auto) [KruegerAlgorithms] - AUTO-GENERATED by build_seed.py (DO NOT edit)
+// STRUCTURE map (7-45 DTE) = thick lines | NEAR map (0-5 DTE) = dotted = daily weather/pinning
+// v3: Vanna/Charm strikes + VIX regime in the label (context, unvalidated - not a signal).
+// Template is deliberately pure ASCII (the .bat rituals copy via `clip` = ANSI).
+// Daily BEFORE US open: `python build_seed.py` -> paste the whole file into the Pine editor -> Save.
 indicator("Gamma Levels v3 (Auto) [KruegerAlgorithms]", overlay = true)
 
-// ===== TAGES-LEVEL in INDEX-PUNKTEN (auto-generiert __DATE__) =====
+// ===== DAILY LEVELS in INDEX POINTS (auto-generated __DATE__) =====
 __LEVELS__
 // ==================================================================
 
 idx        = input.string("Auto", "Index", options = ["Auto", "NQ", "DOW", "GOLD", "DAX", "FTSE"])
-offset     = input.float(0.0, "Manueller Offset (Punkte, Broker-Basis)")
-neutralPct = input.float(0.3, "Flip-Zone (+/- %)", minval = 0.05, step = 0.05)
-showReg    = input.bool(true, "Regime-Hintergrund (gruen/rot/grau)")
+offset     = input.float(0.0, "Manual offset (points, broker basis)")
+neutralPct = input.float(0.3, "Flip zone (+/- %)", minval = 0.05, step = 0.05)
+showReg    = input.bool(true, "Regime background (green/red/grey)")
 
-grpS = "STRUKTUR-Karte (7-45 DTE) - stabile Tageslinien"
-showFlip = input.bool(true,  "FLIP - gelb, dick",                        group = grpS)
-showCW   = input.bool(true,  "CALL-WALL - rot, dick",                    group = grpS)
-showPW   = input.bool(true,  "PUT-WALL - gruen, dick",                   group = grpS)
-showCW2  = input.bool(true,  "CALL-WALL 2 (Strike-Regal) - rot, gestrichelt",   group = grpS)
-showPW2  = input.bool(true,  "PUT-WALL 2 (Strike-Regal) - gruen, gestrichelt",  group = grpS)
+grpS = "STRUCTURE map (7-45 DTE) - stable daily lines"
+showFlip = input.bool(true,  "FLIP - yellow, thick",                     group = grpS)
+showCW   = input.bool(true,  "CALL WALL - red, thick",                   group = grpS)
+showPW   = input.bool(true,  "PUT WALL - green, thick",                  group = grpS)
+showCW2  = input.bool(true,  "CALL WALL 2 (strike shelf) - red, dashed",    group = grpS)
+showPW2  = input.bool(true,  "PUT WALL 2 (strike shelf) - green, dashed",   group = grpS)
 
-grpN = "NAH-Karte (0-5 DTE) - 0DTE-Tageswetter/Pinning"
-showNCW  = input.bool(true,  "0DTE CALL-WALL - orange, gepunktet",       group = grpN)
-showNPW  = input.bool(true,  "0DTE PUT-WALL - tuerkis, gepunktet",       group = grpN)
-showNF   = input.bool(false, "0DTE FLIP - gelb, gepunktet",              group = grpN)
+grpN = "NEAR map (0-5 DTE) - 0DTE daily weather/pinning"
+showNCW  = input.bool(true,  "0DTE CALL WALL - orange, dotted",          group = grpN)
+showNPW  = input.bool(true,  "0DTE PUT WALL - teal, dotted",             group = grpN)
+showNF   = input.bool(false, "0DTE FLIP - yellow, dotted",               group = grpN)
 
-grpX = "Sonstiges"
-showEM   = input.bool(true,  "EXPECTED MOVE +/-1 Tag - blau, gepunktet", group = grpX)
-showMP   = input.bool(false, "MAX PAIN - grau, gepunktet",               group = grpX)
+grpX = "Other"
+showEM   = input.bool(true,  "EXPECTED MOVE +/-1 day - blue, dotted",    group = grpX)
+showMP   = input.bool(false, "MAX PAIN - grey, dotted",                  group = grpX)
 
-grpV = "FLOW & VIX (Kontext, unvalidiert - kein Trade-Signal)"
-showVanna = input.bool(true,  "VANNA-Strike - violett, gepunktet",       group = grpV)
-showCharm = input.bool(true,  "CHARM-Strike - aqua, gepunktet",          group = grpV)
-showVix   = input.bool(true,  "VIX-Regime im Label (CBOE:VIX)",          group = grpV)
+grpV = "FLOW & VIX (context, unvalidated - not a trade signal)"
+showVanna = input.bool(true,  "VANNA strike - purple, dotted",           group = grpV)
+showCharm = input.bool(true,  "CHARM strike - aqua, dotted",             group = grpV)
+showVix   = input.bool(true,  "VIX regime in label (CBOE:VIX)",          group = grpV)
 
 t = str.upper(syminfo.ticker)
 detect() =>
@@ -175,24 +231,24 @@ nflip = off(pick(NQ_NF,   DOW_NF,   GOLD_NF,   DAX_NF,   FTSE_NF))
 mp    = off(pick(NQ_MP,   DOW_MP,   GOLD_MP,   DAX_MP,   FTSE_MP))
 spotL = pick(NQ_SPOT, DOW_SPOT, GOLD_SPOT, DAX_SPOT, FTSE_SPOT)
 em    = pick(NQ_EM,   DOW_EM,   GOLD_EM,   DAX_EM,   FTSE_EM)
-van   = pick(NQ_VAN,  DOW_VAN,  GOLD_VAN,  DAX_VAN,  FTSE_VAN)     // Mio USD, Vorzeichen = Dealer-Konvention
+van   = pick(NQ_VAN,  DOW_VAN,  GOLD_VAN,  DAX_VAN,  FTSE_VAN)     // USD millions, sign = dealer convention
 vank  = off(pick(NQ_VANK, DOW_VANK, GOLD_VANK, DAX_VANK, FTSE_VANK))
 chm   = pick(NQ_CHM,  DOW_CHM,  GOLD_CHM,  DAX_CHM,  FTSE_CHM)
 chmk  = off(pick(NQ_CHMK, DOW_CHMK, GOLD_CHMK, DAX_CHMK, FTSE_CHMK))
 
-// ---- VIX-Regime (gestriger Daily-Close = bestaetigt, kein Repaint) ----
-// Tertile relativ zu den letzten 250 Handelstagen; Tilt nach validiertem Befund:
-// hoch/steigend -> Entscheidungstag (Trend ODER Whipsaw), niedrig/fallend -> Chop.
+// ---- VIX regime (yesterday's daily close = confirmed, no repaint) ----
+// Tertiles relative to the last 250 trading days; tilt per validated finding:
+// high/rising -> decision day (trend OR whipsaw), low/falling -> chop.
 [vix1, vix2, vp33, vp67] = request.security("CBOE:VIX", "D",
      [close[1], close[2],
       ta.percentile_linear_interpolation(close[1], 250, 33.333),
       ta.percentile_linear_interpolation(close[1], 250, 66.667)],
      ignore_invalid_symbol = true)
-vixReg  = na(vix1) or na(vp33) ? "n/a" : vix1 <= vp33 ? "NIEDRIG" : vix1 >= vp67 ? "HOCH" : "MITTEL"
-vixDir  = na(vix1) or na(vix2) ? "" : vix1 > vix2 + 0.05 ? "steigt" : vix1 < vix2 - 0.05 ? "faellt" : "flach"
+vixReg  = na(vix1) or na(vp33) ? "n/a" : vix1 <= vp33 ? "LOW" : vix1 >= vp67 ? "HIGH" : "MID"
+vixDir  = na(vix1) or na(vix2) ? "" : vix1 > vix2 + 0.05 ? "rising" : vix1 < vix2 - 0.05 ? "falling" : "flat"
 vixTilt = vixReg == "n/a" ? "" :
-     (vixReg == "HOCH" or vixDir == "steigt") ? "Entscheidungs-Tilt (Trend/Whipsaw, wenig Chop)" :
-     (vixReg == "NIEDRIG" and vixDir != "steigt") ? "Chop-Tilt" : "neutral"
+     (vixReg == "HIGH" or vixDir == "rising") ? "decision tilt (trend/whipsaw, little chop)" :
+     (vixReg == "LOW" and vixDir != "rising") ? "chop tilt" : "neutral"
 
 distPct = flip > 0 ? (close - flip) / flip * 100 : na
 reg = flip <= 0 ? -99 : math.abs(distPct) < neutralPct ? 0 : distPct > 0 ? 1 : -1
@@ -238,21 +294,21 @@ if barstate.islast
         lVA := line.new(x1, vank, bar_index, vank, color = color.new(color.purple, 40), width = 1, extend = extend.right, style = line.style_dotted)
     if showCharm and chmk > 0
         lCH := line.new(x1, chmk, bar_index, chmk, color = color.new(color.aqua, 45), width = 1, extend = extend.right, style = line.style_dotted)
-    regTxt = reg == 1 ? "LONG-GAMMA (Pin/Reversion)" : reg == -1 ? "SHORT-GAMMA (Trend/Amplify)" : reg == 0 ? "FLIP-ZONE (kein Signal)" : "keine Daten"
+    regTxt = reg == 1 ? "LONG GAMMA (pin/reversion)" : reg == -1 ? "SHORT GAMMA (trend/amplify)" : reg == 0 ? "FLIP ZONE (no signal)" : "no data"
     flowTxt = (van != 0.0 or chm != 0.0) ?
-         "\nVanna " + (van > 0 ? "+" : "") + str.tostring(van, "#.#") + "M (Vol-runter=" + (van > 0 ? "KAUF" : "Verkauf") + ")" + (vank > 0 ? " @" + str.tostring(vank, format.mintick) : "") +
-         "  |  Charm " + (chm > 0 ? "+" : "") + str.tostring(chm, "#.#") + "M (" + (chm > 0 ? "Zeit=Kauf-Stuetze" : "Zeit=Verkauf-Druck") + ")" + (chmk > 0 ? " @" + str.tostring(chmk, format.mintick) : "") : ""
+         "\nVanna " + (van > 0 ? "+" : "") + str.tostring(van, "#.#") + "M (vol down = " + (van > 0 ? "BUY" : "SELL") + ")" + (vank > 0 ? " @" + str.tostring(vank, format.mintick) : "") +
+         "  |  Charm " + (chm > 0 ? "+" : "") + str.tostring(chm, "#.#") + "M (" + (chm > 0 ? "time = buy support" : "time = sell pressure") + ")" + (chmk > 0 ? " @" + str.tostring(chmk, format.mintick) : "") : ""
     vixTxt = showVix and vixReg != "n/a" ?
          "\nVIX " + str.tostring(vix1, "#.##") + " (" + vixReg + ", " + vixDir + ") -> " + vixTilt : ""
-    txt = sel + " - " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + flowTxt + vixTxt + "\nLevel vom " + LEV_DATE + (isStale ? "  !! VERALTET - build_seed laufen lassen !!" : "")
+    txt = sel + " - " + regTxt + (flip > 0 ? "  Flip " + str.tostring(flip, format.mintick) + " (" + str.tostring(distPct, "#.##") + "%)" : "") + flowTxt + vixTxt + "\nLevels as of " + LEV_DATE + (isStale ? "  !! STALE - run build_seed !!" : "")
     lab := label.new(bar_index, high, txt, style = label.style_label_left, color = isStale ? color.new(color.orange, 10) : reg == 1 ? color.new(color.green, 25) : reg == -1 ? color.new(color.red, 25) : color.new(color.gray, 25), textcolor = color.white, size = size.small)
 
-// ===== ALERTS (im Alert-Dialog auswaehlbar) =====
-alertcondition(ta.crossover(close, flip),  "Gamma: Flip-Cross UP",   "Spot kreuzt Gamma-Flip nach OBEN -> Richtung Long-Gamma/Pinning")
-alertcondition(ta.crossunder(close, flip), "Gamma: Flip-Cross DOWN", "Spot kreuzt Gamma-Flip nach UNTEN -> Short-Gamma/Amplify")
-alertcondition(ta.crossunder(close, pw),   "Gamma: Put-Wall BRUCH",  "Put-Wall gebrochen -> Falltuer offen (Amplify-Risiko)")
-alertcondition(ta.crossover(close, pw),    "Gamma: Put-Wall RECLAIM", "Put-Wall von unten zurueckerobert -> Umkehr-Signatur (Dealer-Rueckkaeufe)")
-alertcondition(ta.crossover(close, cw),    "Gamma: Call-Wall Break UP", "Call-Wall ueberschritten -> meist Magnet/Pin, selten Anschluss")
+// ===== ALERTS (selectable in the alert dialog) =====
+alertcondition(ta.crossover(close, flip),  "Gamma: Flip cross UP",   "Spot crosses the gamma flip UPWARD -> towards long gamma/pinning")
+alertcondition(ta.crossunder(close, flip), "Gamma: Flip cross DOWN", "Spot crosses the gamma flip DOWNWARD -> short gamma/amplify")
+alertcondition(ta.crossunder(close, pw),   "Gamma: Put wall BREAK",  "Put wall broken -> trapdoor open (amplify risk)")
+alertcondition(ta.crossover(close, pw),    "Gamma: Put wall RECLAIM", "Put wall reclaimed from below -> reversal signature (dealer buybacks)")
+alertcondition(ta.crossover(close, cw),    "Gamma: Call wall break UP", "Call wall exceeded -> usually magnet/pin, rarely follow-through")
 '''
 
 
@@ -337,8 +393,10 @@ def main():
         try:
             R = float(struct.get("R") or 1.0)
             tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
-            sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R)
-            nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R)
+            sb = tv_seed_block(df[df["dte"] >= STRUCT_MIN_DTE], struct["spot"], today, R,
+                               aiv=struct.get("atm_iv"))
+            nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R,
+                               aiv=(near or {}).get("atm_iv"))
             if sb:
                 out = "=== STRUCTURE (7-45 DTE) — Feld 1 ===\n" + sb
                 if nb:
@@ -466,7 +524,7 @@ def intraday_update():
         levels[prefix]["npw"] = npw
         print(f"{prefix:5s} 0DTE-Volumen-Walls: CW {ncw:.0f} | PW {npw:.0f} "
               f"(Call-Vol {calls.sum():,.0f} / Put-Vol {puts.sum():,.0f})")
-    out = gen_auto_pine(levels, today, note=" +0DTE-Vol-Update")
+    out = gen_auto_pine(levels, today, note=" +0DTE volume update")
     print(f"\nPine aktualisiert -> {out} (nur gepunktete Linien neu, "
           f"Struktur unveraendert). In den Pine-Editor kopieren.")
 
@@ -523,7 +581,7 @@ def eu_morning_update():
         print(f"DAX   FLOW | Vanna {struct['total_vanna']/1e6:+.0f}M ({struct['vanna_flow']} "
               f"@{g(struct,'vanna_strike'):.0f}) | Charm {struct['total_charm']/1e6:+.0f}M "
               f"({struct['charm_flow']} @{g(struct,'charm_strike'):.0f})")
-    out = gen_auto_pine(levels, today, note=" EU-Morgenlauf (US=Vortag)")
+    out = gen_auto_pine(levels, today, note=" EU morning run (US = previous day)")
     print(f"\nPine aktualisiert -> {out}")
     print("   => In den Pine-Editor kopieren. US-Linien = Stand Vortag, um 14:00 vollen Lauf machen.")
 
