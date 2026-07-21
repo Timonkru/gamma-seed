@@ -51,12 +51,17 @@ SCALE_KEYS = ("gamma_flip", "call_wall", "call_wall2", "put_wall", "put_wall2",
               "max_pain", "exp_move_1d", "vanna_strike", "charm_strike")
 
 
-def _fmt_row(t, scale):
-    """Kompakt: Strike ohne .00 wenn ganzzahlig; iv 4 / dte 1 Dezimale —
-    Rundungs-Paritaet gemessen exakt (Flip/Vanna/Charm unveraendert)."""
+def _fmt_row(t, scale, k_int=False):
+    """Eine Zeile: strike;callOI;putOI;iv;dte.
+    v1.6: bei skalierten Maerkten (ETF-Strikes x R) traegt der Strike sinnlose
+    Nachkommastellen — 18492.52 statt 18493 bei ~41 Punkten Strike-Raster.
+    Ganzzahlig gerundet spart 3 Zeichen je Zeile, iv mit 3 statt 4 Dezimalen
+    ein weiteres: zusammen ~22 %% mehr Zeilen im selben Zeichenbudget.
+    Die Rundung liegt weit unter dem Strike-Raster und aendert die Rechnung
+    nicht messbar (Paritaet wird per tv_seed_selftest geprueft)."""
     k = t[1] * scale
-    ks = f"{k:.2f}".rstrip("0").rstrip(".")
-    return f"{ks};{t[2]:.0f};{t[3]:.0f};{t[4]:.4f};{t[5]:.1f}"
+    ks = f"{k:.0f}" if k_int else f"{k:.2f}".rstrip("0").rstrip(".")
+    return f"{ks};{t[2]:.0f};{t[3]:.0f};{t[4]:.3f};{t[5]:.1f}"
 
 
 def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
@@ -115,10 +120,14 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
     # verlor die hohen Strikes, ohne es anzuzeigen. Budget 10.500 laesst
     # Marge fuer Header/Marker. Kompakt-Format (Strike ohne .00, iv 4 / dte
     # 1 Dezimale) ist paritaets-verifiziert: Flip/Vanna/Charm exakt.
-    BUDGET = 10100
+    # v1.6: zwei Struktur-Felder je Markt im Skript -> doppeltes Budget.
+    # tv_seed_block liefert weiter EINEN Block; write_tv_seed teilt ihn in
+    # Teile, die je unter das TV-Feldlimit passen.
+    BUDGET = 20200
     keep, used = [], 90   # Header-Reserve
+    k_int = abs(scale - 1.0) > 1e-9   # skalierter Markt -> ganzzahlige Strikes
     for t in weighted:
-        ln = len(_fmt_row(t, scale)) + 1
+        ln = len(_fmt_row(t, scale, k_int)) + 1
         if used + ln > BUDGET:
             break
         keep.append(t)
@@ -131,7 +140,7 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
         if id(t) not in kept:
             keep.append(t)
     keep.sort(key=lambda t: (t[1], t[5]))          # nach Strike, dann DTE
-    rows = [_fmt_row(t, scale) for t in keep]
+    rows = [_fmt_row(t, scale, k_int) for t in keep]
     # aiv-Parameter = atm_iv aus DEMSELBEN compute_levels-Lauf wie das Label
     # (eine Quelle!). Eigene Neuberechnung nur als Fallback: am ATM liegen
     # viele Zeilen mit identischer Distanz — welche 6 der Median sieht, haengt
@@ -152,11 +161,38 @@ def tv_seed_block(win, spot, day, scale=1.0, aiv=None, market=None, gmap=None):
     return hdr + "\n" + "\n".join(rows)
 
 
+FIELD_LIMIT = 9900           # TV kappt input.text_area still bei 10.905.
+# Reserve, weil Editor und Zwischenablage aus jedem Zeilenumbruch ein
+# CRLF machen koennen - das zaehlt fuers Limit mit (~450 Zeilen = ~450 Zeichen).
+
+
+def _split_block(block, limit=FIELD_LIMIT):
+    """Zerlegt einen Seed-Block in Teile, die je unter das TV-Feldlimit
+    passen. Jeder Teil bekommt denselben Header, damit er fuer sich
+    parsebar ist (das Skript haengt die Teile wieder aneinander)."""
+    ln = block.split("\n")
+    hdr, rows = ln[0], ln[1:]
+    parts, cur, used = [], [], len(hdr) + 1
+    for r in rows:
+        if used + len(r) + 1 > limit and cur:
+            parts.append(hdr + "\n" + "\n".join(cur))
+            cur, used = [], len(hdr) + 1
+        cur.append(r)
+        used += len(r) + 1
+    if cur:
+        parts.append(hdr + "\n" + "\n".join(cur))
+    return parts
+
+
 def write_tv_seed(prefix, df, struct, near, today):
-    """Seed-Datei fuers oeffentliche GEX Profile. Als FUNKTION an beiden
-    Pfaden (voller Lauf UND --eu) - vorher schrieb nur der volle Lauf;
-    der --eu-Morgenlauf liess die Seeds auf Vortags-Stand (Befund 21.07.:
-    DAX.txt trug noch date=2026-07-20 im Alt-Format)."""
+    """Seed-Dateien fuers oeffentliche GEX Profile. Als FUNKTION an beiden
+    Pfaden (voller Lauf UND --eu) - vorher schrieb nur der volle Lauf; der
+    --eu-Morgenlauf liess die Seeds auf Vortags-Stand (Befund 21.07.).
+    v1.6: schreibt je Karte feldfertige Teile:
+      <MARKT>_S1.txt / _S2.txt   Struktur (Skript-Felder "structure" / "part 2")
+      <MARKT>_N1.txt             Nah
+    Die frueheren Sammeldateien bleiben als <MARKT>.txt fuer den Blick ins
+    Rohmaterial erhalten."""
     try:
         R = float(struct.get("R") or 1.0)
         tvdir = ROOT / "tv_seed"; tvdir.mkdir(exist_ok=True)
@@ -164,12 +200,26 @@ def write_tv_seed(prefix, df, struct, near, today):
                            aiv=struct.get("atm_iv"), market=prefix)
         nb = tv_seed_block(df[df["dte"] <= NEAR_MAX_DTE], struct["spot"], today, R,
                            aiv=(near or {}).get("atm_iv"), market=prefix, gmap="near")
-        if sb:
-            # v1.3: pure Paste-Bloecke (market=/map= im Header ersetzen die
-            # alten ===-Marker; Datei kann 1:1 in ein Feld kopiert werden)
-            out = sb + ("\n\n" + nb if nb else "")
-            (tvdir / f"{prefix}.txt").write_text(out + "\n", encoding="utf-8")
-            pack_paste_fields(tvdir)
+        if not sb:
+            return
+        for old in tvdir.glob(f"{prefix}_S*.txt"):
+            old.unlink()
+        for old in tvdir.glob(f"{prefix}_N*.txt"):
+            old.unlink()
+        sparts = _split_block(sb)
+        for i, p in enumerate(sparts, 1):
+            (tvdir / f"{prefix}_S{i}.txt").write_text(p + "\n", encoding="utf-8")
+        nparts = _split_block(nb) if nb else []
+        for i, p in enumerate(nparts, 1):
+            (tvdir / f"{prefix}_N{i}.txt").write_text(p + "\n", encoding="utf-8")
+        (tvdir / f"{prefix}.txt").write_text(
+            sb + ("\n\n" + nb if nb else "") + "\n", encoding="utf-8")
+        rows_s = sb.count("\n")
+        print(f"[tv_seed] {prefix}: Struktur {rows_s} Zeilen -> {len(sparts)} Feld(er), "
+              f"Nah -> {len(nparts)} Feld(er)")
+        if len(sparts) > 2:
+            print(f"[WARNUNG] {prefix}: {len(sparts)} Struktur-Teile, das Skript "
+                  f"hat 2 Felder - Teil 3+ geht verloren.")
     except Exception as e:
         print(f"[warn] {prefix}: TV-Seed fehlgeschlagen ({e})")
 
